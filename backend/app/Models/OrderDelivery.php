@@ -1,0 +1,22 @@
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Model;
+
+class OrderDelivery extends Model
+{
+    protected $fillable = [
+        'order_id', 'agency_id', 'delivery_method', 'delivery_status',
+    ];
+
+    public function order()
+    {
+        return $this->belongsTo(Order::class);
+    }
+
+    public function agency()
+    {
+        return $this->belongsTo(DeliveryAgency::class, 'agency_id');
+    }
+}
