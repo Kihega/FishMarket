@@ -22,6 +22,9 @@ fi
 echo "--- php artisan tinker check of config('database.connections.mysql') ---"
 php artisan tinker --execute="echo json_encode(config('database.connections.mysql'));" 2>&1 || echo "tinker check failed"
 
+echo "--- raw env() and getenv() checks ---"
+php artisan tinker --execute="echo 'env(DATABASE_URL): ' . (env('DATABASE_URL') ? 'SET (' . strlen(env('DATABASE_URL')) . ' chars)' : 'NULL'); echo PHP_EOL; echo 'getenv(DATABASE_URL): ' . (getenv('DATABASE_URL') ? 'SET' : 'FALSE');" 2>&1 || echo "env check failed"
+
 echo "===================================="
 
 # Generate APP_KEY only if not already set via Render env vars
