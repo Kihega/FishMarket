@@ -1,0 +1,22 @@
+# Never send these into the Docker build context, even if accidentally
+# tracked in git. This is the actual safety net — .gitignore alone does
+# NOT prevent already-tracked files from being copied by `COPY . .`.
+
+.env
+.env.*
+!.env.example
+!.env.testing
+
+.git
+.gitignore
+
+node_modules
+vendor
+
+storage/logs/*
+storage/framework/cache/*
+storage/framework/sessions/*
+storage/framework/views/*
+
+*.log
+.DS_Store
