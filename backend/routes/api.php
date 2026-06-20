@@ -7,6 +7,7 @@ use App\Http\Controllers\API\FishStockController;
 use App\Http\Controllers\API\FishCategoryController;
 use App\Http\Controllers\API\DeliveryAgencyController;
 use App\Http\Controllers\API\OrderController;
+use App\Http\Controllers\API\SubscriptionController;
 use App\Http\Controllers\API\AdminController;
 
 // ── Public ──────────────────────────────────────────────────────────────
@@ -27,6 +28,10 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // Seller profile
     Route::put('/seller/profile', [SellerController::class, 'updateProfile']);
+
+    // Seller subscription (plan selection after signup)
+    Route::post('/seller/subscription', [SubscriptionController::class, 'store']);
+    Route::get('/seller/subscription', [SubscriptionController::class, 'mine']);
 
     // Fish stocks (seller only — enforced in controller)
     Route::post('/stocks', [FishStockController::class, 'store']);
