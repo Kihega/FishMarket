@@ -6,9 +6,11 @@ import { useUIStore } from '../../store/uiStore'
 export default function MarketPage() {
   const { openSignupChoice } = useUIStore()
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, refetch, isFetching } = useQuery({
     queryKey: ['sellers-home'],
     queryFn: () => getSellers({}).then((r) => r.data),
+    retry: 1,
+    retryDelay: 3000,
   })
 
   return (
@@ -49,11 +51,30 @@ export default function MarketPage() {
         <h2 className="text-3xl font-bold text-blue-900 mb-2">Verified Sellers Near You</h2>
         <p className="text-gray-500 mb-10">Browse active fish sellers on the platform</p>
 
-        {isLoading ? (
-          <div className="flex flex-wrap justify-center gap-6">
-            {[...Array(3)].map((_, i) => (
-              <div key={i} className="w-64 h-48 bg-gray-100 animate-pulse rounded-2xl" />
-            ))}
+        {isLoading || isFetching ? (
+          <div>
+            <div className="flex flex-wrap justify-center gap-6">
+              {[...Array(3)].map((_, i) => (
+                <div key={i} className="w-64 h-48 bg-gray-100 animate-pulse rounded-2xl" />
+              ))}
+            </div>
+            <p className="text-gray-400 text-sm mt-4">
+              Connecting to server… this can take up to a minute if it's
+              waking up from sleep.
+            </p>
+          </div>
+        ) : isError ? (
+          <div className="max-w-md mx-auto bg-yellow-50 border border-yellow-200 rounded-xl p-6">
+            <p className="text-yellow-800 font-medium mb-3">
+              Couldn't reach the server. It may be waking up — this can
+              take up to a minute on the free tier.
+            </p>
+            <button
+              onClick={() => refetch()}
+              className="bg-blue-700 hover:bg-blue-800 text-white px-5 py-2 rounded-lg font-semibold"
+            >
+              Try Again
+            </button>
           </div>
         ) : data?.data?.length ? (
           <div className="flex flex-wrap justify-center gap-6">

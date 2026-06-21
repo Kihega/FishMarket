@@ -4,6 +4,10 @@ import { useAuthStore } from '../store/authStore'
 const client = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL,
   headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+  // Render's free tier can take 30-50s to wake from sleep on the first
+  // request. We give it generous room here rather than failing fast,
+  // since a quick timeout would make cold starts look like real errors.
+  timeout: 45000,
 })
 
 // Attach the Sanctum token to every outgoing request, if present.
