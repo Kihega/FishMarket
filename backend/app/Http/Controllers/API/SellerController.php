@@ -4,6 +4,7 @@ namespace App\Http\Controllers\API;
 
 use App\Http\Controllers\Controller;
 use App\Models\User;
+use App\Models\Order;
 use Illuminate\Http\Request;
 
 class SellerController extends Controller
@@ -33,7 +34,7 @@ class SellerController extends Controller
         ]);
     }
 
-    // Seller: update own profile
+    // Seller: update own profile (including brand_logo upload)
     public function updateProfile(Request $request)
     {
         $user = $request->user();
@@ -53,5 +54,36 @@ class SellerController extends Controller
         $user->update($data);
 
         return response()->json($user);
+    }
+
+    /**
+     * Seller's live list of buyers who have placed orders on their
+     * platform — contact info, when they ordered, and delivery
+     * status. Powers the "Manage Buyers" sidebar section.
+     */
+    public function buyers(Request $request)
+    {
+        $seller = $request->user();
+        abort_unless($seller->role === 'seller', 403);
+
+        $orders = Order::with(['buyer', 'delivery'])
+            ->where('seller_id', $seller->id)
+            ->latest()
+            ->get();
+
+        $buyers = $orders->map(function ($order) {
+            return [
+                'order_id' => $order->id,
+                'buyer_name' => $order->buyer->name,
+                'buyer_phone' => $order->buyer->phone,
+                'buyer_email' => $order->buyer->email,
+                'ordered_at' => $order->created_at->toIso8601String(),
+                'order_status' => $order->status,
+                'payment_status' => $order->payment_status,
+                'delivery_status' => $order->delivery?->delivery_status ?? 'pending',
+            ];
+        });
+
+        return response()->json($buyers);
     }
 }

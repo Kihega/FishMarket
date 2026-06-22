@@ -9,6 +9,7 @@ use App\Http\Controllers\API\DeliveryAgencyController;
 use App\Http\Controllers\API\OrderController;
 use App\Http\Controllers\API\SubscriptionController;
 use App\Http\Controllers\API\AdminController;
+use App\Http\Controllers\API\PasswordController;
 
 // ── Public ──────────────────────────────────────────────────────────────
 Route::post('/register', [AuthController::class, 'register']);
@@ -26,8 +27,12 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/logout', [AuthController::class, 'logout']);
     Route::get('/me', [AuthController::class, 'me']);
 
+    // Any authenticated user — change own password
+    Route::put('/password', [PasswordController::class, 'update']);
+
     // Seller profile
     Route::put('/seller/profile', [SellerController::class, 'updateProfile']);
+    Route::get('/seller/buyers', [SellerController::class, 'buyers']);
 
     // Seller subscription (plan selection after signup)
     Route::post('/seller/subscription', [SubscriptionController::class, 'store']);
@@ -51,8 +56,11 @@ Route::middleware('auth:sanctum')->group(function () {
     // Admin only
     Route::middleware('admin')->prefix('admin')->group(function () {
         Route::get('/stats', [AdminController::class, 'stats']);
+        Route::get('/metrics', [AdminController::class, 'metrics']);
         Route::get('/users', [AdminController::class, 'users']);
+        Route::post('/users', [AdminController::class, 'createAdmin']);
         Route::put('/users/{user}/toggle', [AdminController::class, 'toggleUser']);
+        Route::delete('/users/{user}', [AdminController::class, 'deleteUser']);
         Route::get('/subscriptions', [AdminController::class, 'subscriptions']);
         Route::put('/subscriptions/{subscription}/confirm', [AdminController::class, 'confirmSubscription']);
     });
