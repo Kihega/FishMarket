@@ -2,10 +2,13 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 
 class Bill extends Model
 {
+    use HasFactory;
+
     protected $fillable = ['order_id', 'buyer_id', 'bill_number', 'issued_at'];
 
     protected function casts(): array
