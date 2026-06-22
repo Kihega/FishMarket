@@ -63,7 +63,7 @@ jobs:
           DB_DATABASE: smartfish_test
           DB_USERNAME: root
           DB_PASSWORD: secret
-        run: php artisan test --parallel
+        run: php artisan test
 
   # ── Frontend build (can also run locally) ────────────────────────────
   frontend-build:
