@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import toast from 'react-hot-toast'
+import { Fish, Mail, Lock } from 'lucide-react'
 import ModalShell from './ModalShell'
 import { useUIStore } from '../../store/uiStore'
 import { useAuthStore } from '../../store/authStore'
@@ -35,7 +36,9 @@ export default function LoginModal() {
   return (
     <ModalShell onClose={closeModal}>
       <div className="text-center mb-6">
-        <h2 className="text-2xl font-bold text-blue-900">🐟 FishMarket TZ</h2>
+        <h2 className="text-2xl font-bold text-blue-900 flex items-center justify-center gap-2">
+          <Fish className="w-6 h-6" /> SmartFish
+        </h2>
         <p className="text-gray-500 mt-1">Log in to your account</p>
       </div>
 
@@ -47,7 +50,7 @@ export default function LoginModal() {
 
       <form onSubmit={handleSubmit} className="space-y-4">
         <div className="flex items-center border border-gray-300 rounded-lg px-3 py-2.5 focus-within:ring-2 focus-within:ring-blue-400">
-          <i className="fas fa-envelope text-blue-600 mr-3" />
+          <Mail className="w-4 h-4 text-blue-600 mr-3 flex-shrink-0" />
           <input
             type="email"
             required
@@ -59,7 +62,7 @@ export default function LoginModal() {
         </div>
 
         <div className="flex items-center border border-gray-300 rounded-lg px-3 py-2.5 focus-within:ring-2 focus-within:ring-blue-400">
-          <i className="fas fa-lock text-blue-600 mr-3" />
+          <Lock className="w-4 h-4 text-blue-600 mr-3 flex-shrink-0" />
           <input
             type="password"
             required

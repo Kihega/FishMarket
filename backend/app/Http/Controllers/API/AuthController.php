@@ -13,21 +13,39 @@ class AuthController extends Controller
     {
         $data = $request->validate([
             'name' => 'required|string|max:255',
+            'business_name' => 'nullable|string|max:255',
             'email' => 'required|email|unique:users',
-            'password' => 'required|min:8|confirmed',
+            'password' => [
+                'required', 'min:8', 'confirmed',
+                'regex:/^(?=.*[a-zA-Z])(?=.*\d)(?=.*[^a-zA-Z\d]).+$/',
+            ],
             'role' => 'required|in:seller,buyer',
             'phone' => 'nullable|string',
             'location' => 'nullable|string',
+            'office_address' => 'nullable|string',
+        ], [
+            'password.regex' => 'Password must contain letters, numbers, and at least one special character.',
         ]);
+
+        // Auto-capitalize each word (e.g. "john doe" -> "John Doe") rather
+        // than rejecting lowercase input — friendlier than a validation error.
+        $data['name'] = ucwords(strtolower($data['name']));
+        if (! empty($data['business_name'])) {
+            $data['business_name'] = ucwords(strtolower($data['business_name']));
+        }
 
         $user = User::create([
             'name' => $data['name'],
+            'business_name' => $data['business_name'] ?? null,
             'email' => $data['email'],
             'password' => Hash::make($data['password']),
             'role' => $data['role'],
             'phone' => $data['phone'] ?? null,
             'location' => $data['location'] ?? null,
-            'subscription_status' => $data['role'] === 'seller' ? 'pending' : 'inactive',
+            'office_address' => $data['office_address'] ?? null,
+            // No subscription gate — sellers are immediately active.
+            // This is a research/testing build, not a live payment system.
+            'subscription_status' => 'active',
         ]);
 
         $token = $user->createToken('auth_token')->plainTextToken;

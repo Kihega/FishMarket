@@ -1,9 +1,11 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
+import { Fish, MapPin, Receipt } from 'lucide-react'
 import { getOrders } from '../../api/orders'
 import { getSellers } from '../../api/sellers'
 import { useAuthStore } from '../../store/authStore'
+import { formatTsh } from '../../utils/currency'
 import DashboardLayout from '../../components/dashboard/DashboardLayout'
 import ChangePasswordModal from '../../components/dashboard/ChangePasswordModal'
 import { HomeIcon, ClipboardListIcon, LockIcon, LogoutIcon } from '../../components/dashboard/Icons'
@@ -86,18 +88,20 @@ function HomePanel() {
               <div className="flex items-center gap-3">
                 {seller.brand_logo ? (
                   <img
-                    src={`/storage/${seller.brand_logo}`}
+                    src={seller.brand_logo.startsWith('data:') ? seller.brand_logo : `/storage/${seller.brand_logo}`}
                     alt={seller.name}
                     className="w-14 h-14 rounded-full object-cover border"
                   />
                 ) : (
-                  <div className="w-14 h-14 rounded-full bg-blue-100 flex items-center justify-center text-2xl">
-                    🐟
+                  <div className="w-14 h-14 rounded-full bg-blue-100 flex items-center justify-center">
+                    <Fish className="w-6 h-6 text-blue-600" />
                   </div>
                 )}
                 <div>
                   <h3 className="font-bold text-blue-900">{seller.name}</h3>
-                  <p className="text-gray-500 text-sm">📍 {seller.location_address || seller.location}</p>
+                  <p className="text-gray-500 text-sm flex items-center gap-1">
+                    <MapPin className="w-3.5 h-3.5" /> {seller.location_address || seller.location}
+                  </p>
                 </div>
               </div>
               <p className="text-sm text-blue-600">{seller.fish_stocks_count} items available</p>
@@ -132,7 +136,7 @@ function OrdersPanel() {
                 <div>
                   <p className="font-semibold">Order #{order.id} — {order.seller?.name}</p>
                   <p className="text-gray-500 text-sm">
-                    {order.items?.length} item(s) · TZS {Number(order.total_amount).toLocaleString()}
+                    {order.items?.length} item(s) · {formatTsh(order.total_amount)}
                   </p>
                 </div>
                 <span className={`text-xs px-3 py-1 rounded-full font-medium ${STATUS_STYLE[order.status]}`}>
@@ -140,7 +144,9 @@ function OrdersPanel() {
                 </span>
               </div>
               {order.bill && (
-                <p className="text-sm text-blue-600 mt-2">🧾 Bill #{order.bill.bill_number}</p>
+                <p className="text-sm text-blue-600 mt-2 flex items-center gap-1">
+                  <Receipt className="w-4 h-4" /> Bill #{order.bill.bill_number}
+                </p>
               )}
             </div>
           ))}

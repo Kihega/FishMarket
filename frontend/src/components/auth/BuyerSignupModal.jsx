@@ -1,10 +1,12 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import toast from 'react-hot-toast'
+import { User, Phone, Mail, Lock } from 'lucide-react'
 import ModalShell from './ModalShell'
 import { useUIStore } from '../../store/uiStore'
 import { useAuthStore } from '../../store/authStore'
 import { register } from '../../api/auth'
+import PasswordStrengthIndicator, { isPasswordStrong } from './PasswordStrengthIndicator'
 
 export default function BuyerSignupModal() {
   const { closeModal, openLogin } = useUIStore()
@@ -41,8 +43,8 @@ export default function BuyerSignupModal() {
       setError('Passwords do not match')
       return
     }
-    if (form.password.length < 8) {
-      setError('Password must be at least 8 characters')
+    if (!isPasswordStrong(form.password)) {
+      setError('Password must contain letters, numbers, and a special character')
       return
     }
 
@@ -58,7 +60,7 @@ export default function BuyerSignupModal() {
       })
       setAuth(data.user, data.token)
       closeModal()
-      toast.success(`Welcome to FishMarket TZ, ${data.user.name}!`)
+      toast.success(`Welcome to SmartFish, ${data.user.name}!`)
       navigate('/dashboard')
     } catch (err) {
       setError(err.response?.data?.message || 'Something went wrong. Please try again.')
@@ -81,29 +83,30 @@ export default function BuyerSignupModal() {
       )}
 
       <form onSubmit={handleSubmit} className="space-y-3">
-        <Field icon="fa-user" placeholder="Full Name" value={form.name} onChange={update('name')} />
+        <Field icon={User} placeholder="Full Name" value={form.name} onChange={update('name')} />
         <Field
-          icon="fa-phone"
+          icon={Phone}
           placeholder="+255 7XX XXX XXX"
           value={form.phone}
           onChange={handlePhoneChange}
         />
         <Field
-          icon="fa-envelope"
+          icon={Mail}
           type="email"
           placeholder="Email"
           value={form.email}
           onChange={update('email')}
         />
         <Field
-          icon="fa-lock"
+          icon={Lock}
           type="password"
           placeholder="Password"
           value={form.password}
           onChange={update('password')}
         />
+        <PasswordStrengthIndicator password={form.password} />
         <Field
-          icon="fa-lock"
+          icon={Lock}
           type="password"
           placeholder="Confirm Password"
           value={form.password_confirmation}
@@ -129,10 +132,10 @@ export default function BuyerSignupModal() {
   )
 }
 
-function Field({ icon, type = 'text', placeholder, value, onChange }) {
+function Field({ icon: Icon, type = 'text', placeholder, value, onChange }) {
   return (
     <div className="flex items-center border border-gray-300 rounded-lg px-3 py-2.5 focus-within:ring-2 focus-within:ring-blue-400">
-      <i className={`fas ${icon} text-blue-600 mr-3 w-4`} />
+      <Icon className="w-4 h-4 text-blue-600 mr-3 flex-shrink-0" />
       <input
         type={type}
         required
