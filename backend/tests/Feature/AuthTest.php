@@ -15,8 +15,8 @@ class AuthTest extends TestCase
         $response = $this->postJson('/api/register', [
             'name' => 'Jane Buyer',
             'email' => 'jane@example.com',
-            'password' => 'password123',
-            'password_confirmation' => 'password123',
+            'password' => 'Password123!',
+            'password_confirmation' => 'Password123!',
             'role' => 'buyer',
             'phone' => '0700000000',
             'location' => 'Dar es Salaam',
@@ -29,27 +29,60 @@ class AuthTest extends TestCase
         $this->assertDatabaseHas('users', ['email' => 'jane@example.com']);
     }
 
-    public function test_seller_registers_with_pending_subscription(): void
+    public function test_seller_registers_immediately_active(): void
     {
+        // No subscription/plan step anymore — sellers are immediately
+        // active and usable right after registering.
         $response = $this->postJson('/api/register', [
             'name' => 'John Seller',
+            'business_name' => 'Fresh Fish Co',
             'email' => 'john@example.com',
-            'password' => 'password123',
-            'password_confirmation' => 'password123',
+            'password' => 'Password123!',
+            'password_confirmation' => 'Password123!',
             'role' => 'seller',
         ]);
 
         $response->assertStatus(201)
-            ->assertJsonPath('user.subscription_status', 'pending');
+            ->assertJsonPath('user.subscription_status', 'active')
+            ->assertJsonPath('user.business_name', 'Fresh Fish Co');
     }
 
-    public function test_registration_fails_with_invalid_role(): void
+    public function test_name_and_business_name_are_auto_capitalized(): void
+    {
+        $response = $this->postJson('/api/register', [
+            'name' => 'john seller',
+            'business_name' => 'fresh fish co',
+            'email' => 'autocap@example.com',
+            'password' => 'Password123!',
+            'password_confirmation' => 'Password123!',
+            'role' => 'seller',
+        ]);
+
+        $response->assertStatus(201)
+            ->assertJsonPath('user.name', 'John Seller')
+            ->assertJsonPath('user.business_name', 'Fresh Fish Co');
+    }
+
+    public function test_registration_rejects_weak_password_without_special_character(): void
+    {
+        $response = $this->postJson('/api/register', [
+            'name' => 'Weak Pass',
+            'email' => 'weak@example.com',
+            'password' => 'password123', // letters + numbers, no special char
+            'password_confirmation' => 'password123',
+            'role' => 'buyer',
+        ]);
+
+        $response->assertStatus(422);
+    }
+
+    public function test_registration_rejects_invalid_role(): void
     {
         $response = $this->postJson('/api/register', [
             'name' => 'Bad Role',
             'email' => 'badrole@example.com',
-            'password' => 'password123',
-            'password_confirmation' => 'password123',
+            'password' => 'Password123!',
+            'password_confirmation' => 'Password123!',
             'role' => 'admin', // not allowed at registration
         ]);
 
@@ -63,8 +96,8 @@ class AuthTest extends TestCase
         $response = $this->postJson('/api/register', [
             'name' => 'Duplicate',
             'email' => 'taken@example.com',
-            'password' => 'password123',
-            'password_confirmation' => 'password123',
+            'password' => 'Password123!',
+            'password_confirmation' => 'Password123!',
             'role' => 'buyer',
         ]);
 

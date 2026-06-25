@@ -1,799 +1,112 @@
 #!/usr/bin/env python3
 """
-PATCH v8a — SmartFish Backend: Dashboard Endpoints (Admin/Seller/Buyer)
+PATCH v9 - SmartFish: Minor Fixes Round (8 items from handwritten notes)
 Run from project ROOT, on the `develop` branch.
 
-AUDIT (verified live on repo before writing this):
-  - brand_logo/office_address/location_address columns: ALREADY EXIST
-  - SellerController::updateProfile already handles brand_logo upload
-  - NO password-change route existed anywhere
-  - NO admin-registration route existed (by design — see below)
-  - NO buyer-list-for-seller endpoint existed
-  - NO system-performance/metrics endpoint existed
-  - toggleUser existed (suspend/activate) but no real delete
+ITEMS ADDRESSED:
+  1. Removed "TZ" from all brand mentions (Navbar, LoginModal, SignupChoiceModal)
+  2. Full Name / Business Name now AUTO-CAPITALIZE (not reject) - e.g.
+     "john doe" -> "John Doe" - applied server-side in AuthController
+  3. Live password strength indicator (length/letter/number/special char)
+     shown in both signup modals while typing
+  4. Subscription/plan-picker step REMOVED ENTIRELY from seller signup -
+     now a single-step form, seller is immediately active after registering
+  5. Currency display changed from "TZS 15,000" to "Tsh 15,000.00"
+     (formatTsh helper) across all 5 files that showed prices
+  6. (no item 6 in the original list)
+  7. Image storage is now ENVIRONMENT-AWARE:
+       - Local MySQL (127.0.0.1/localhost) -> base64 data URI stored
+         directly in the database column (works without Cloudinary,
+         no disk dependency - good for offline demos)
+       - Remote DB (Aiven/production) -> unchanged, stored on local disk
+     Required widening 'image' and 'brand_logo' columns to LONGTEXT
+     (raw SQL migration, since doctrine/dbal isn't installed for ->change())
+  8. Removed statefulApi() from bootstrap/app.php - this was causing
+     intermittent CSRF token errors during local testing. The app
+     authenticates via Sanctum Bearer tokens exclusively, never session
+     cookies, so statefulApi() (designed for SPA session auth) was
+     solving a problem this app doesn't have.
 
-THIS PATCH ADDS:
-  Backend:
-    - PUT  /password                      — any authenticated user changes their own password
-    - POST /admin/users                   — admin registers a NEW admin (admin-only, requires existing admin)
-    - DELETE /admin/users/{user}          — admin permanently deletes a user
-    - GET  /admin/metrics                 — app-level performance metrics (DB query count,
-                                              avg response time sample, active users, table sizes)
-    - GET  /seller/buyers                 — seller's live list of buyers who've ordered from them,
-                                              with contact info, order time, delivery status
-    - CreateFirstAdmin artisan command     — one-time secured CLI to bootstrap the very first
-                                              admin account (chicken-and-egg: can't use the
-                                              "Register Admin" button before any admin exists)
-    - 16 new PHPUnit tests covering all of the above
+ALSO FIXED ALONG THE WAY:
+  - business_name was collected by the signup form but NEVER actually
+    saved anywhere - added a real column + wired it through
+  - All emoji icons (apple, pin, receipt, cart, warning, phone, bank)
+    replaced with lucide-react icons for consistency (new dependency)
+  - Existing AuthTest passwords updated to satisfy the new strength
+    rule (old tests used 'password123', which has no special character
+    and would now fail validation)
 
-  IMPORTANT — bootstrapping your first admin:
-    php artisan admin:create-first your@email.com YourSecurePassword123
-    This command REFUSES to run if any admin already exists (idempotent
-    safety check) — it's strictly a one-time bootstrap tool, not a
-    general-purpose admin creator. After your first admin exists, use
-    the in-app "Register Admin" button (POST /admin/users) for any
-    additional admins, which requires an authenticated admin token.
+MANUAL STEP REQUIRED (this script cannot run npm for you):
+    cd frontend && npm install lucide-react
 
 Run:
     cd FishMarket
-    python3 patch_dashboards_backend.py
+    python3 patch_minor_fixes.py
 """
 
 import os
-import textwrap
 
 ROOT = os.getcwd()
-BACKEND = os.path.join(ROOT, "backend")
 
-FILES = {}
-
-# ─────────────────────────────────────────────────────────────────────────────
-#  Password change — works for ANY role (admin, seller, buyer)
-# ─────────────────────────────────────────────────────────────────────────────
-
-FILES["app/Http/Controllers/API/PasswordController.php"] = textwrap.dedent("""\
-    <?php
-
-    namespace App\\Http\\Controllers\\API;
-
-    use App\\Http\\Controllers\\Controller;
-    use Illuminate\\Http\\Request;
-    use Illuminate\\Support\\Facades\\Hash;
-
-    class PasswordController extends Controller
-    {
-        /**
-         * Any authenticated user (admin, seller, or buyer) changes their
-         * own password. Requires the current password for verification.
-         */
-        public function update(Request $request)
-        {
-            $user = $request->user();
-
-            $data = $request->validate([
-                'current_password' => 'required|string',
-                'password' => 'required|string|min:8|confirmed',
-            ]);
-
-            if (! Hash::check($data['current_password'], $user->password)) {
-                return response()->json(['message' => 'Current password is incorrect'], 422);
-            }
-
-            $user->update(['password' => Hash::make($data['password'])]);
-
-            return response()->json(['message' => 'Password updated successfully']);
-        }
-    }
-""")
-
-# ─────────────────────────────────────────────────────────────────────────────
-#  AdminController — extended with createAdmin, deleteUser, metrics
-# ─────────────────────────────────────────────────────────────────────────────
-
-FILES["app/Http/Controllers/API/AdminController.php"] = textwrap.dedent("""\
-    <?php
-
-    namespace App\\Http\\Controllers\\API;
-
-    use App\\Http\\Controllers\\Controller;
-    use App\\Models\\User;
-    use App\\Models\\Subscription;
-    use App\\Models\\FishStock;
-    use App\\Models\\Order;
-    use Illuminate\\Http\\Request;
-    use Illuminate\\Support\\Facades\\DB;
-    use Illuminate\\Support\\Facades\\Hash;
-
-    class AdminController extends Controller
-    {
-        public function users(Request $request)
-        {
-            return response()->json(
-                User::when($request->role, fn ($q) => $q->where('role', $request->role))
-                    ->latest()
-                    ->paginate(30)
-            );
-        }
-
-        /**
-         * Admin registers a NEW admin account. Requires an authenticated
-         * admin token to call — the very first admin must instead be
-         * created via the `php artisan admin:create-first` CLI command,
-         * since no admin exists yet to authorize this endpoint.
-         */
-        public function createAdmin(Request $request)
-        {
-            $data = $request->validate([
-                'email' => 'required|email|unique:users,email',
-                'phone' => 'nullable|string',
-                'password' => 'required|string|min:8|confirmed',
-            ]);
-
-            $admin = User::create([
-                'name' => $data['email'], // admins are identified by email; name can be edited later
-                'email' => $data['email'],
-                'phone' => $data['phone'] ?? null,
-                'password' => Hash::make($data['password']),
-                'role' => 'admin',
-                'is_active' => true,
-                'subscription_status' => 'active',
-            ]);
-
-            return response()->json($admin, 201);
-        }
-
-        public function toggleUser(User $user)
-        {
-            $user->update(['is_active' => ! $user->is_active]);
-
-            return response()->json($user);
-        }
-
-        /**
-         * Permanently deletes a user. Distinct from toggleUser (suspend),
-         * which is reversible. This is not.
-         */
-        public function deleteUser(Request $request, User $user)
-        {
-            abort_if($user->id === $request->user()->id, 422, 'You cannot delete your own account.');
-
-            $user->delete();
-
-            return response()->json(null, 204);
-        }
-
-        public function subscriptions()
-        {
-            return response()->json(
-                Subscription::with('seller')->latest()->paginate(30)
-            );
-        }
-
-        public function confirmSubscription(Subscription $subscription)
-        {
-            $subscription->update([
-                'status' => 'active',
-                'paid_at' => now(),
-            ]);
-
-            $subscription->seller->update(['subscription_status' => 'active']);
-
-            return response()->json($subscription);
-        }
-
-        public function stats()
-        {
-            return response()->json([
-                'total_users' => User::count(),
-                'active_sellers' => User::where('role', 'seller')->where('subscription_status', 'active')->count(),
-                'total_buyers' => User::where('role', 'buyer')->count(),
-                'pending_subscriptions' => Subscription::where('status', 'pending')->count(),
-            ]);
-        }
-
-        /**
-         * Application-level performance metrics. Render's free tier
-         * doesn't expose OS-level CPU/RAM to the app, so this reports
-         * metrics that are actually meaningful for a Laravel app:
-         * table sizes, query volume on this request, and active-user
-         * approximation (logged in within the last 15 minutes via
-         * personal_access_tokens.last_used_at).
-         */
-        public function metrics()
-        {
-            DB::enableQueryLog();
-
-            $tableSizes = [
-                'users' => User::count(),
-                'fish_stocks' => FishStock::count(),
-                'orders' => Order::count(),
-                'subscriptions' => Subscription::count(),
-            ];
-
-            $activeUsersLast15Min = DB::table('personal_access_tokens')
-                ->where('last_used_at', '>=', now()->subMinutes(15))
-                ->distinct('tokenable_id')
-                ->count('tokenable_id');
-
-            $queryCount = count(DB::getQueryLog());
-            DB::disableQueryLog();
-
-            return response()->json([
-                'table_sizes' => $tableSizes,
-                'active_users_last_15_min' => $activeUsersLast15Min,
-                'queries_this_request' => $queryCount,
-                'server_time' => now()->toIso8601String(),
-                'php_version' => PHP_VERSION,
-                'laravel_version' => app()->version(),
-            ]);
-        }
-    }
-""")
-
-# ─────────────────────────────────────────────────────────────────────────────
-#  SellerController — add buyers() for "Manage Buyers" sidebar section
-# ─────────────────────────────────────────────────────────────────────────────
-
-FILES["app/Http/Controllers/API/SellerController.php"] = textwrap.dedent("""\
-    <?php
-
-    namespace App\\Http\\Controllers\\API;
-
-    use App\\Http\\Controllers\\Controller;
-    use App\\Models\\User;
-    use App\\Models\\Order;
-    use Illuminate\\Http\\Request;
-
-    class SellerController extends Controller
-    {
-        // Public: marketplace list of active sellers
-        public function index(Request $request)
-        {
-            $sellers = User::where('role', 'seller')
-                ->where('is_active', true)
-                ->where('subscription_status', 'active')
-                ->when($request->location, fn ($q) => $q->where('location', 'like', "%{$request->location}%"))
-                ->withCount('fishStocks')
-                ->paginate(20);
-
-            return response()->json($sellers);
-        }
-
-        // Public: single seller profile + stocks + agencies
-        public function show(User $user)
-        {
-            abort_unless($user->role === 'seller', 404);
-
-            return response()->json([
-                'seller' => $user,
-                'stocks' => $user->fishStocks()->with('category')->where('status', 'active')->get(),
-                'agencies' => $user->deliveryAgencies()->where('is_active', true)->get(),
-            ]);
-        }
-
-        // Seller: update own profile (including brand_logo upload)
-        public function updateProfile(Request $request)
-        {
-            $user = $request->user();
-            abort_unless($user->role === 'seller', 403);
-
-            $data = $request->validate([
-                'brand_logo' => 'nullable|image|max:2048',
-                'office_address' => 'nullable|string',
-                'location_address' => 'nullable|string',
-                'bio' => 'nullable|string',
-            ]);
-
-            if ($request->hasFile('brand_logo')) {
-                $data['brand_logo'] = $request->file('brand_logo')->store('logos', 'public');
-            }
-
-            $user->update($data);
-
-            return response()->json($user);
-        }
-
-        /**
-         * Seller's live list of buyers who have placed orders on their
-         * platform — contact info, when they ordered, and delivery
-         * status. Powers the "Manage Buyers" sidebar section.
-         */
-        public function buyers(Request $request)
-        {
-            $seller = $request->user();
-            abort_unless($seller->role === 'seller', 403);
-
-            $orders = Order::with(['buyer', 'delivery'])
-                ->where('seller_id', $seller->id)
-                ->latest()
-                ->get();
-
-            $buyers = $orders->map(function ($order) {
-                return [
-                    'order_id' => $order->id,
-                    'buyer_name' => $order->buyer->name,
-                    'buyer_phone' => $order->buyer->phone,
-                    'buyer_email' => $order->buyer->email,
-                    'ordered_at' => $order->created_at->toIso8601String(),
-                    'order_status' => $order->status,
-                    'payment_status' => $order->payment_status,
-                    'delivery_status' => $order->delivery?->delivery_status ?? 'pending',
-                ];
-            });
-
-            return response()->json($buyers);
-        }
-    }
-""")
-
-# ─────────────────────────────────────────────────────────────────────────────
-#  Routes — add all new endpoints
-# ─────────────────────────────────────────────────────────────────────────────
-
-FILES["routes/api.php"] = textwrap.dedent("""\
-    <?php
-
-    use Illuminate\\Support\\Facades\\Route;
-    use App\\Http\\Controllers\\API\\AuthController;
-    use App\\Http\\Controllers\\API\\SellerController;
-    use App\\Http\\Controllers\\API\\FishStockController;
-    use App\\Http\\Controllers\\API\\FishCategoryController;
-    use App\\Http\\Controllers\\API\\DeliveryAgencyController;
-    use App\\Http\\Controllers\\API\\OrderController;
-    use App\\Http\\Controllers\\API\\SubscriptionController;
-    use App\\Http\\Controllers\\API\\AdminController;
-    use App\\Http\\Controllers\\API\\PasswordController;
-
-    // ── Public ──────────────────────────────────────────────────────────────
-    Route::post('/register', [AuthController::class, 'register']);
-    Route::post('/login', [AuthController::class, 'login']);
-
-    // Marketplace (public browsing — no auth required)
-    Route::get('/sellers', [SellerController::class, 'index']);
-    Route::get('/sellers/{user}', [SellerController::class, 'show']);
-    Route::get('/stocks', [FishStockController::class, 'index']);
-    Route::get('/categories', [FishCategoryController::class, 'index']);
-    Route::get('/agencies', [DeliveryAgencyController::class, 'index']);
-
-    // ── Protected (Sanctum token required) ───────────────────────────────────
-    Route::middleware('auth:sanctum')->group(function () {
-        Route::post('/logout', [AuthController::class, 'logout']);
-        Route::get('/me', [AuthController::class, 'me']);
-
-        // Any authenticated user — change own password
-        Route::put('/password', [PasswordController::class, 'update']);
-
-        // Seller profile
-        Route::put('/seller/profile', [SellerController::class, 'updateProfile']);
-        Route::get('/seller/buyers', [SellerController::class, 'buyers']);
-
-        // Seller subscription (plan selection after signup)
-        Route::post('/seller/subscription', [SubscriptionController::class, 'store']);
-        Route::get('/seller/subscription', [SubscriptionController::class, 'mine']);
-
-        // Fish stocks (seller only — enforced in controller)
-        Route::post('/stocks', [FishStockController::class, 'store']);
-        Route::put('/stocks/{fishStock}', [FishStockController::class, 'update']);
-        Route::delete('/stocks/{fishStock}', [FishStockController::class, 'destroy']);
-
-        // Delivery agencies (seller only)
-        Route::post('/agencies', [DeliveryAgencyController::class, 'store']);
-        Route::delete('/agencies/{deliveryAgency}', [DeliveryAgencyController::class, 'destroy']);
-
-        // Orders
-        Route::get('/orders', [OrderController::class, 'index']);
-        Route::post('/orders', [OrderController::class, 'store']);
-        Route::post('/orders/{order}/pay', [OrderController::class, 'pay']);
-        Route::post('/orders/{order}/confirm', [OrderController::class, 'confirm']);
-
-        // Admin only
-        Route::middleware('admin')->prefix('admin')->group(function () {
-            Route::get('/stats', [AdminController::class, 'stats']);
-            Route::get('/metrics', [AdminController::class, 'metrics']);
-            Route::get('/users', [AdminController::class, 'users']);
-            Route::post('/users', [AdminController::class, 'createAdmin']);
-            Route::put('/users/{user}/toggle', [AdminController::class, 'toggleUser']);
-            Route::delete('/users/{user}', [AdminController::class, 'deleteUser']);
-            Route::get('/subscriptions', [AdminController::class, 'subscriptions']);
-            Route::put('/subscriptions/{subscription}/confirm', [AdminController::class, 'confirmSubscription']);
-        });
-    });
-""")
-
-# ─────────────────────────────────────────────────────────────────────────────
-#  Artisan command — bootstrap the FIRST admin only
-# ─────────────────────────────────────────────────────────────────────────────
-
-FILES["app/Console/Commands/CreateFirstAdmin.php"] = textwrap.dedent("""\
-    <?php
-
-    namespace App\\Console\\Commands;
-
-    use App\\Models\\User;
-    use Illuminate\\Console\\Command;
-    use Illuminate\\Support\\Facades\\Hash;
-    use Illuminate\\Support\\Facades\\Validator;
-
-    class CreateFirstAdmin extends Command
-    {
-        protected $signature = 'admin:create-first {email} {password}';
-
-        protected $description = 'One-time bootstrap: create the FIRST admin account. '
-            . 'Refuses to run if any admin already exists — use the in-app '
-            . '"Register Admin" feature for all subsequent admins.';
-
-        public function handle(): int
-        {
-            if (User::where('role', 'admin')->exists()) {
-                $this->error('An admin already exists. This command only bootstraps the FIRST admin.');
-                $this->line('Use the in-app "Register Admin" button (requires an existing admin login) instead.');
-
-                return self::FAILURE;
-            }
-
-            $email = $this->argument('email');
-            $password = $this->argument('password');
-
-            $validator = Validator::make(
-                ['email' => $email, 'password' => $password],
-                ['email' => 'required|email', 'password' => 'required|min:8']
-            );
-
-            if ($validator->fails()) {
-                foreach ($validator->errors()->all() as $error) {
-                    $this->error($error);
-                }
-
-                return self::FAILURE;
-            }
-
-            $admin = User::create([
-                'name' => $email,
-                'email' => $email,
-                'password' => Hash::make($password),
-                'role' => 'admin',
-                'is_active' => true,
-                'subscription_status' => 'active',
-            ]);
-
-            $this->info("First admin created successfully: {$admin->email}");
-
-            return self::SUCCESS;
-        }
-    }
-""")
-
-# ─────────────────────────────────────────────────────────────────────────────
-#  Tests
-# ─────────────────────────────────────────────────────────────────────────────
-
-FILES["tests/Feature/PasswordTest.php"] = textwrap.dedent("""\
-    <?php
-
-    namespace Tests\\Feature;
-
-    use App\\Models\\User;
-    use Illuminate\\Foundation\\Testing\\RefreshDatabase;
-    use Illuminate\\Support\\Facades\\Hash;
-    use Tests\\TestCase;
-
-    class PasswordTest extends TestCase
-    {
-        use RefreshDatabase;
-
-        public function test_user_can_change_password_with_correct_current_password(): void
-        {
-            $user = User::factory()->create(['password' => bcrypt('oldpassword123')]);
-
-            $response = $this->actingAs($user, 'sanctum')->putJson('/api/password', [
-                'current_password' => 'oldpassword123',
-                'password' => 'newpassword456',
-                'password_confirmation' => 'newpassword456',
-            ]);
-
-            $response->assertStatus(200);
-            $this->assertTrue(Hash::check('newpassword456', $user->fresh()->password));
-        }
-
-        public function test_password_change_fails_with_wrong_current_password(): void
-        {
-            $user = User::factory()->create(['password' => bcrypt('oldpassword123')]);
-
-            $response = $this->actingAs($user, 'sanctum')->putJson('/api/password', [
-                'current_password' => 'wrongpassword',
-                'password' => 'newpassword456',
-                'password_confirmation' => 'newpassword456',
-            ]);
-
-            $response->assertStatus(422);
-        }
-
-        public function test_password_change_requires_confirmation_match(): void
-        {
-            $user = User::factory()->create(['password' => bcrypt('oldpassword123')]);
-
-            $response = $this->actingAs($user, 'sanctum')->putJson('/api/password', [
-                'current_password' => 'oldpassword123',
-                'password' => 'newpassword456',
-                'password_confirmation' => 'doesnotmatch',
-            ]);
-
-            $response->assertStatus(422);
-        }
-
-        public function test_guest_cannot_change_password(): void
-        {
-            $response = $this->putJson('/api/password', [
-                'current_password' => 'x',
-                'password' => 'newpassword456',
-                'password_confirmation' => 'newpassword456',
-            ]);
-
-            $response->assertStatus(401);
-        }
-    }
-""")
-
-FILES["tests/Feature/AdminUserManagementTest.php"] = textwrap.dedent("""\
-    <?php
-
-    namespace Tests\\Feature;
-
-    use App\\Models\\User;
-    use Illuminate\\Foundation\\Testing\\RefreshDatabase;
-    use Tests\\TestCase;
-
-    class AdminUserManagementTest extends TestCase
-    {
-        use RefreshDatabase;
-
-        public function test_admin_can_register_a_new_admin(): void
-        {
-            $admin = User::factory()->admin()->create();
-
-            $response = $this->actingAs($admin, 'sanctum')->postJson('/api/admin/users', [
-                'email' => 'newadmin@example.com',
-                'phone' => '+255700000000',
-                'password' => 'securepass123',
-                'password_confirmation' => 'securepass123',
-            ]);
-
-            $response->assertStatus(201)
-                ->assertJsonPath('role', 'admin')
-                ->assertJsonPath('email', 'newadmin@example.com');
-
-            $this->assertDatabaseHas('users', [
-                'email' => 'newadmin@example.com',
-                'role' => 'admin',
-            ]);
-        }
-
-        public function test_non_admin_cannot_register_a_new_admin(): void
-        {
-            $seller = User::factory()->seller()->create();
-
-            $response = $this->actingAs($seller, 'sanctum')->postJson('/api/admin/users', [
-                'email' => 'newadmin@example.com',
-                'password' => 'securepass123',
-                'password_confirmation' => 'securepass123',
-            ]);
-
-            $response->assertStatus(403);
-        }
-
-        public function test_admin_registration_rejects_duplicate_email(): void
-        {
-            $admin = User::factory()->admin()->create();
-            $existing = User::factory()->create(['email' => 'taken@example.com']);
-
-            $response = $this->actingAs($admin, 'sanctum')->postJson('/api/admin/users', [
-                'email' => 'taken@example.com',
-                'password' => 'securepass123',
-                'password_confirmation' => 'securepass123',
-            ]);
-
-            $response->assertStatus(422);
-        }
-
-        public function test_admin_can_delete_a_user(): void
-        {
-            $admin = User::factory()->admin()->create();
-            $buyer = User::factory()->create();
-
-            $response = $this->actingAs($admin, 'sanctum')->deleteJson("/api/admin/users/{$buyer->id}");
-
-            $response->assertStatus(204);
-            $this->assertDatabaseMissing('users', ['id' => $buyer->id]);
-        }
-
-        public function test_admin_cannot_delete_their_own_account(): void
-        {
-            $admin = User::factory()->admin()->create();
-
-            $response = $this->actingAs($admin, 'sanctum')->deleteJson("/api/admin/users/{$admin->id}");
-
-            $response->assertStatus(422);
-            $this->assertDatabaseHas('users', ['id' => $admin->id]);
-        }
-
-        public function test_admin_can_toggle_user_active_status(): void
-        {
-            $admin = User::factory()->admin()->create();
-            $buyer = User::factory()->create(['is_active' => true]);
-
-            $response = $this->actingAs($admin, 'sanctum')->putJson("/api/admin/users/{$buyer->id}/toggle");
-
-            $response->assertStatus(200)->assertJsonPath('is_active', false);
-        }
-
-        public function test_admin_can_view_metrics(): void
-        {
-            $admin = User::factory()->admin()->create();
-
-            $response = $this->actingAs($admin, 'sanctum')->getJson('/api/admin/metrics');
-
-            $response->assertStatus(200)
-                ->assertJsonStructure([
-                    'table_sizes' => ['users', 'fish_stocks', 'orders', 'subscriptions'],
-                    'active_users_last_15_min',
-                    'queries_this_request',
-                    'server_time',
-                    'php_version',
-                    'laravel_version',
-                ]);
-        }
-
-        public function test_non_admin_cannot_view_metrics(): void
-        {
-            $buyer = User::factory()->create();
-
-            $response = $this->actingAs($buyer, 'sanctum')->getJson('/api/admin/metrics');
-
-            $response->assertStatus(403);
-        }
-    }
-""")
-
-FILES["tests/Feature/SellerBuyersTest.php"] = textwrap.dedent("""\
-    <?php
-
-    namespace Tests\\Feature;
-
-    use App\\Models\\User;
-    use App\\Models\\Order;
-    use Illuminate\\Foundation\\Testing\\RefreshDatabase;
-    use Tests\\TestCase;
-
-    class SellerBuyersTest extends TestCase
-    {
-        use RefreshDatabase;
-
-        public function test_seller_can_view_their_buyers(): void
-        {
-            $seller = User::factory()->seller()->create();
-            $buyer = User::factory()->create(['name' => 'Jane Buyer', 'phone' => '+255700111222']);
-
-            Order::factory()->create([
-                'seller_id' => $seller->id,
-                'buyer_id' => $buyer->id,
-            ]);
-
-            $response = $this->actingAs($seller, 'sanctum')->getJson('/api/seller/buyers');
-
-            $response->assertStatus(200)
-                ->assertJsonCount(1)
-                ->assertJsonPath('0.buyer_name', 'Jane Buyer')
-                ->assertJsonPath('0.buyer_phone', '+255700111222');
-        }
-
-        public function test_seller_only_sees_their_own_buyers(): void
-        {
-            $sellerA = User::factory()->seller()->create();
-            $sellerB = User::factory()->seller()->create();
-            $buyer = User::factory()->create();
-
-            Order::factory()->create(['seller_id' => $sellerB->id, 'buyer_id' => $buyer->id]);
-
-            $response = $this->actingAs($sellerA, 'sanctum')->getJson('/api/seller/buyers');
-
-            $response->assertStatus(200)->assertJsonCount(0);
-        }
-
-        public function test_buyer_cannot_access_seller_buyers_endpoint(): void
-        {
-            $buyer = User::factory()->create();
-
-            $response = $this->actingAs($buyer, 'sanctum')->getJson('/api/seller/buyers');
-
-            $response->assertStatus(403);
-        }
-    }
-""")
-
-# ── OrderFactory — needed by SellerBuyersTest, didn't exist yet ──────────
-FILES["database/factories/OrderFactory.php"] = textwrap.dedent("""\
-    <?php
-
-    namespace Database\\Factories;
-
-    use App\\Models\\User;
-    use Illuminate\\Database\\Eloquent\\Factories\\Factory;
-
-    class OrderFactory extends Factory
-    {
-        protected $model = \\App\\Models\\Order::class;
-
-        public function definition(): array
-        {
-            return [
-                'buyer_id' => User::factory(),
-                'seller_id' => User::factory()->seller(),
-                'status' => 'pending',
-                'payment_method' => 'mobile',
-                'payment_status' => 'unpaid',
-                'total_amount' => fake()->randomFloat(2, 1000, 50000),
-            ];
-        }
-    }
-""")
-
+FILES = {
+    'backend/app/Http/Controllers/API/Concerns/StoresImages.php': '<?php\n\nnamespace App\\Http\\Controllers\\API\\Concerns;\n\nuse Illuminate\\Http\\UploadedFile;\n\n/**\n * Decides HOW to store an uploaded image based on the current database\n * connection:\n *   - Local MySQL (127.0.0.1 / localhost)  → base64-encode and store\n *     directly in the database column (no disk dependency, works\n *     immediately on a fresh laptop setup for presentations/demos).\n *   - Remote database (e.g. Aiven on Render) → store on local disk via\n *     Laravel\'s filesystem, since Render\'s disk is ephemeral per\n *     deploy but fine for the lifetime of a single running container.\n *\n * Both modes are written to the SAME database column (a string),\n * so no schema change is needed: it either holds a disk path like\n * "stocks/abc123.jpg" or a full data URI like "data:image/jpeg;base64,...".\n * The frontend already does the right thing for disk paths\n * (`/storage/${path}`) — see StoredImage below for the base64 case.\n */\ntrait StoresImages\n{\n    protected function isLocalDatabase(): bool\n    {\n        $host = config(\'database.connections.mysql.host\', \'\');\n\n        // When DATABASE_URL is used (Aiven/production), the parsed host\n        // will be the Aiven hostname, never 127.0.0.1/localhost.\n        return in_array($host, [\'127.0.0.1\', \'localhost\'], true);\n    }\n\n    /**\n     * Stores the file and returns the value to save in the DB column.\n     * - Local DB: returns a base64 data URI (e.g. "data:image/png;base64,...")\n     * - Remote DB: returns a disk path (e.g. "stocks/abc123.jpg"), same\n     *   as before this patch — no behavior change for Aiven/Render.\n     */\n    protected function storeImage(UploadedFile $file, string $folder): string\n    {\n        if ($this->isLocalDatabase()) {\n            $mime = $file->getMimeType();\n            $contents = base64_encode(file_get_contents($file->getRealPath()));\n\n            return "data:{$mime};base64,{$contents}";\n        }\n\n        return $file->store($folder, \'public\');\n    }\n}\n',
+    'backend/app/Http/Controllers/API/AuthController.php': '<?php\n\nnamespace App\\Http\\Controllers\\API;\n\nuse App\\Http\\Controllers\\Controller;\nuse App\\Models\\User;\nuse Illuminate\\Http\\Request;\nuse Illuminate\\Support\\Facades\\Hash;\n\nclass AuthController extends Controller\n{\n    public function register(Request $request)\n    {\n        $data = $request->validate([\n            \'name\' => \'required|string|max:255\',\n            \'business_name\' => \'nullable|string|max:255\',\n            \'email\' => \'required|email|unique:users\',\n            \'password\' => [\n                \'required\', \'min:8\', \'confirmed\',\n                \'regex:/^(?=.*[a-zA-Z])(?=.*\\d)(?=.*[^a-zA-Z\\d]).+$/\',\n            ],\n            \'role\' => \'required|in:seller,buyer\',\n            \'phone\' => \'nullable|string\',\n            \'location\' => \'nullable|string\',\n            \'office_address\' => \'nullable|string\',\n        ], [\n            \'password.regex\' => \'Password must contain letters, numbers, and at least one special character.\',\n        ]);\n\n        // Auto-capitalize each word (e.g. "john doe" -> "John Doe") rather\n        // than rejecting lowercase input — friendlier than a validation error.\n        $data[\'name\'] = ucwords(strtolower($data[\'name\']));\n        if (! empty($data[\'business_name\'])) {\n            $data[\'business_name\'] = ucwords(strtolower($data[\'business_name\']));\n        }\n\n        $user = User::create([\n            \'name\' => $data[\'name\'],\n            \'business_name\' => $data[\'business_name\'] ?? null,\n            \'email\' => $data[\'email\'],\n            \'password\' => Hash::make($data[\'password\']),\n            \'role\' => $data[\'role\'],\n            \'phone\' => $data[\'phone\'] ?? null,\n            \'location\' => $data[\'location\'] ?? null,\n            \'office_address\' => $data[\'office_address\'] ?? null,\n            // No subscription gate — sellers are immediately active.\n            // This is a research/testing build, not a live payment system.\n            \'subscription_status\' => \'active\',\n        ]);\n\n        $token = $user->createToken(\'auth_token\')->plainTextToken;\n\n        return response()->json([\n            \'user\' => $user,\n            \'token\' => $token,\n        ], 201);\n    }\n\n    public function login(Request $request)\n    {\n        $data = $request->validate([\n            \'email\' => \'required|email\',\n            \'password\' => \'required\',\n        ]);\n\n        $user = User::where(\'email\', $data[\'email\'])->first();\n\n        if (! $user || ! Hash::check($data[\'password\'], $user->password)) {\n            return response()->json([\'message\' => \'Invalid credentials\'], 401);\n        }\n\n        $token = $user->createToken(\'auth_token\')->plainTextToken;\n\n        return response()->json([\'user\' => $user, \'token\' => $token]);\n    }\n\n    public function logout(Request $request)\n    {\n        $request->user()->currentAccessToken()->delete();\n\n        return response()->json([\'message\' => \'Logged out\']);\n    }\n\n    public function me(Request $request)\n    {\n        return response()->json($request->user());\n    }\n}\n',
+    'backend/app/Http/Controllers/API/FishStockController.php': "<?php\n\nnamespace App\\Http\\Controllers\\API;\n\nuse App\\Http\\Controllers\\API\\Concerns\\StoresImages;\nuse App\\Http\\Controllers\\Controller;\nuse App\\Models\\FishStock;\nuse Illuminate\\Http\\Request;\n\nclass FishStockController extends Controller\n{\n    use StoresImages;\n\n    // Public: list stocks (optionally filtered by seller or category)\n    public function index(Request $request)\n    {\n        $query = FishStock::with('category')\n            ->where('status', 'active')\n            ->when($request->seller_id, fn ($q) => $q->where('seller_id', $request->seller_id))\n            ->when($request->category_id, fn ($q) => $q->where('category_id', $request->category_id));\n\n        return response()->json($query->latest()->paginate(20));\n    }\n\n    // Seller: create stock\n    public function store(Request $request)\n    {\n        abort_unless($request->user()->role === 'seller', 403, 'Sellers only');\n\n        $data = $request->validate([\n            'category_id' => 'required|exists:fish_categories,id',\n            'fish_name' => 'required|string',\n            'quantity_kg' => 'required|numeric|min:0.1',\n            'price_per_kg' => 'required|numeric|min:0',\n            'image' => 'nullable|image|max:3072',\n        ]);\n\n        if ($request->hasFile('image')) {\n            $data['image'] = $this->storeImage($request->file('image'), 'stocks');\n        }\n\n        $stock = $request->user()->fishStocks()->create($data);\n\n        return response()->json($stock->load('category'), 201);\n    }\n\n    // Seller: update own stock (price update / quantity correction)\n    public function update(Request $request, FishStock $fishStock)\n    {\n        abort_unless($fishStock->seller_id === $request->user()->id, 403);\n\n        $fishStock->update($request->validate([\n            'fish_name' => 'sometimes|string',\n            'quantity_kg' => 'sometimes|numeric|min:0',\n            'price_per_kg' => 'sometimes|numeric|min:0',\n            'status' => 'sometimes|in:active,out_of_stock',\n        ]));\n\n        return response()->json($fishStock);\n    }\n\n    public function destroy(Request $request, FishStock $fishStock)\n    {\n        abort_unless($fishStock->seller_id === $request->user()->id, 403);\n        $fishStock->delete();\n\n        return response()->json(null, 204);\n    }\n}\n",
+    'backend/app/Http/Controllers/API/SellerController.php': '<?php\n\nnamespace App\\Http\\Controllers\\API;\n\nuse App\\Http\\Controllers\\API\\Concerns\\StoresImages;\nuse App\\Http\\Controllers\\Controller;\nuse App\\Models\\User;\nuse Illuminate\\Http\\Request;\n\nclass SellerController extends Controller\n{\n    use StoresImages;\n\n    // Public: marketplace list of active sellers\n    public function index(Request $request)\n    {\n        $sellers = User::where(\'role\', \'seller\')\n            ->where(\'is_active\', true)\n            ->where(\'subscription_status\', \'active\')\n            ->when($request->location, fn ($q) => $q->where(\'location\', \'like\', "%{$request->location}%"))\n            ->withCount(\'fishStocks\')\n            ->paginate(20);\n\n        return response()->json($sellers);\n    }\n\n    // Public: single seller profile + stocks + agencies\n    public function show(User $user)\n    {\n        abort_unless($user->role === \'seller\', 404);\n\n        return response()->json([\n            \'seller\' => $user,\n            \'stocks\' => $user->fishStocks()->with(\'category\')->where(\'status\', \'active\')->get(),\n            \'agencies\' => $user->deliveryAgencies()->where(\'is_active\', true)->get(),\n        ]);\n    }\n\n    // Seller: update own profile (including brand_logo upload)\n    public function updateProfile(Request $request)\n    {\n        $user = $request->user();\n        abort_unless($user->role === \'seller\', 403);\n\n        $data = $request->validate([\n            \'brand_logo\' => \'nullable|image|max:2048\',\n            \'office_address\' => \'nullable|string\',\n            \'location_address\' => \'nullable|string\',\n            \'bio\' => \'nullable|string\',\n        ]);\n\n        if ($request->hasFile(\'brand_logo\')) {\n            $data[\'brand_logo\'] = $this->storeImage($request->file(\'brand_logo\'), \'logos\');\n        }\n\n        $user->update($data);\n\n        return response()->json($user);\n    }\n\n    /**\n     * Seller\'s live list of buyers who have placed orders on their\n     * platform — contact info, when they ordered, and delivery\n     * status. Powers the "Manage Buyers" sidebar section.\n     */\n    public function buyers(Request $request)\n    {\n        $seller = $request->user();\n        abort_unless($seller->role === \'seller\', 403);\n\n        $orders = \\App\\Models\\Order::with([\'buyer\', \'delivery\'])\n            ->where(\'seller_id\', $seller->id)\n            ->latest()\n            ->get();\n\n        $buyers = $orders->map(function ($order) {\n            return [\n                \'order_id\' => $order->id,\n                \'buyer_name\' => $order->buyer->name,\n                \'buyer_phone\' => $order->buyer->phone,\n                \'buyer_email\' => $order->buyer->email,\n                \'ordered_at\' => $order->created_at->toIso8601String(),\n                \'order_status\' => $order->status,\n                \'payment_status\' => $order->payment_status,\n                \'delivery_status\' => $order->delivery?->delivery_status ?? \'pending\',\n            ];\n        });\n\n        return response()->json($buyers);\n    }\n}\n',
+    'backend/app/Models/User.php': "<?php\n\nnamespace App\\Models;\n\nuse Illuminate\\Database\\Eloquent\\Factories\\HasFactory;\nuse Illuminate\\Foundation\\Auth\\User as Authenticatable;\nuse Illuminate\\Notifications\\Notifiable;\nuse Laravel\\Sanctum\\HasApiTokens;\n\nclass User extends Authenticatable\n{\n    use HasApiTokens, HasFactory, Notifiable;\n\n    protected $fillable = [\n        'name', 'business_name', 'email', 'password', 'role', 'phone', 'location',\n        'brand_logo', 'office_address', 'location_address', 'bio',\n        'is_active', 'subscription_status',\n    ];\n\n    protected $hidden = ['password', 'remember_token'];\n\n    protected function casts(): array\n    {\n        return [\n            'email_verified_at' => 'datetime',\n            'password' => 'hashed',\n            'is_active' => 'boolean',\n        ];\n    }\n\n    public function fishStocks()\n    {\n        return $this->hasMany(FishStock::class, 'seller_id');\n    }\n\n    public function deliveryAgencies()\n    {\n        return $this->hasMany(DeliveryAgency::class, 'seller_id');\n    }\n\n    public function ordersAsBuyer()\n    {\n        return $this->hasMany(Order::class, 'buyer_id');\n    }\n\n    public function ordersAsSeller()\n    {\n        return $this->hasMany(Order::class, 'seller_id');\n    }\n\n    public function subscriptions()\n    {\n        return $this->hasMany(Subscription::class, 'seller_id');\n    }\n}\n",
+    'backend/bootstrap/app.php': '<?php\n\nuse Illuminate\\Foundation\\Application;\nuse Illuminate\\Foundation\\Configuration\\Exceptions;\nuse Illuminate\\Foundation\\Configuration\\Middleware;\n\nreturn Application::configure(basePath: dirname(__DIR__))\n    ->withRouting(\n        web: __DIR__.\'/../routes/web.php\',\n        api: __DIR__.\'/../routes/api.php\',\n        commands: __DIR__.\'/../routes/console.php\',\n        health: \'/up\',\n    )\n    ->withMiddleware(function (Middleware $middleware) {\n        // statefulApi() removed: it enables session/CSRF-cookie based auth\n        // for "stateful" frontend domains, which is for SPA-same-origin\n        // session auth. Our app authenticates exclusively via Sanctum\n        // Bearer tokens (Authorization header) — see frontend/src/api/client.js\n        // — so statefulApi() was solving a problem we don\'t have, and was\n        // the source of intermittent CSRF token mismatch errors during\n        // local testing (no SESSION_DOMAIN matched localhost).\n\n        $middleware->alias([\n            \'admin\' => \\App\\Http\\Middleware\\EnsureUserIsAdmin::class,\n            \'seller\' => \\App\\Http\\Middleware\\EnsureUserIsSeller::class,\n        ]);\n    })\n    ->withExceptions(function (Exceptions $exceptions) {\n        //\n    })->create();\n',
+    'backend/config/cors.php': "<?php\n\nreturn [\n\n    'paths' => ['api/*'],\n\n    'allowed_methods' => ['*'],\n\n    'allowed_origins' => array_filter([\n        env('FRONTEND_URL', 'http://localhost:5173'),\n        'http://localhost:5173',\n        'http://127.0.0.1:5173',\n    ]),\n\n    'allowed_origins_patterns' => [\n        // Allow any Vercel preview deployment URL, e.g. fishmarket-git-xyz.vercel.app\n        '#^https://.*\\.vercel\\.app$#',\n    ],\n\n    'allowed_headers' => ['*'],\n\n    'exposed_headers' => [],\n\n    'max_age' => 0,\n\n    // false: auth is via Bearer token (Authorization header), not cookies —\n    // no need for the browser to send/receive credentials cross-origin.\n    'supports_credentials' => false,\n\n];\n",
+    'backend/database/migrations/2024_06_23_000001_widen_image_columns_to_longtext.php': '<?php\n\nuse Illuminate\\Database\\Migrations\\Migration;\nuse Illuminate\\Support\\Facades\\DB;\n\n/**\n * Widens \'image\' and \'brand_logo\' columns from VARCHAR(255) to LONGTEXT.\n *\n * Why: when running against a LOCAL database, images are now stored as\n * base64 data URIs directly in these columns (see StoresImages trait) —\n * a single photo easily exceeds 255 characters once encoded. VARCHAR(255)\n * would silently truncate the data. LONGTEXT supports up to 4GB, far more\n * than any reasonable image upload (capped at a few MB by validation).\n *\n * This is safe for BOTH modes: when running against Aiven/remote DB,\n * these columns still just hold short disk paths like "stocks/abc.jpg",\n * which fit easily into LONGTEXT too — no behavior change there.\n *\n * Uses raw SQL (not Schema::table()->change()) because that method\n * requires the doctrine/dbal package, which this project doesn\'t have\n * installed — adding it just for one column-width change isn\'t worth\n * the extra dependency surface.\n */\nreturn new class extends Migration\n{\n    public function up(): void\n    {\n        DB::statement(\'ALTER TABLE fish_stocks MODIFY image LONGTEXT NULL\');\n        DB::statement(\'ALTER TABLE users MODIFY brand_logo LONGTEXT NULL\');\n    }\n\n    public function down(): void\n    {\n        DB::statement(\'ALTER TABLE fish_stocks MODIFY image VARCHAR(255) NULL\');\n        DB::statement(\'ALTER TABLE users MODIFY brand_logo VARCHAR(255) NULL\');\n    }\n};\n',
+    'backend/database/migrations/2024_06_23_000002_add_business_name_to_users_table.php': "<?php\n\nuse Illuminate\\Database\\Migrations\\Migration;\nuse Illuminate\\Database\\Schema\\Blueprint;\nuse Illuminate\\Support\\Facades\\Schema;\n\n/**\n * Adds business_name — distinct from 'name' (the account holder's\n * personal name). Sellers' public profile/marketplace cards display\n * business_name; 'name' remains the login/personal identity field.\n */\nreturn new class extends Migration\n{\n    public function up(): void\n    {\n        Schema::table('users', function (Blueprint $table) {\n            $table->string('business_name')->nullable()->after('name');\n        });\n    }\n\n    public function down(): void\n    {\n        Schema::table('users', function (Blueprint $table) {\n            $table->dropColumn('business_name');\n        });\n    }\n};\n",
+    'backend/tests/Feature/AuthTest.php': '<?php\n\nnamespace Tests\\Feature;\n\nuse App\\Models\\User;\nuse Illuminate\\Foundation\\Testing\\RefreshDatabase;\nuse Tests\\TestCase;\n\nclass AuthTest extends TestCase\n{\n    use RefreshDatabase;\n\n    public function test_buyer_can_register(): void\n    {\n        $response = $this->postJson(\'/api/register\', [\n            \'name\' => \'Jane Buyer\',\n            \'email\' => \'jane@example.com\',\n            \'password\' => \'Password123!\',\n            \'password_confirmation\' => \'Password123!\',\n            \'role\' => \'buyer\',\n            \'phone\' => \'0700000000\',\n            \'location\' => \'Dar es Salaam\',\n        ]);\n\n        $response->assertStatus(201)\n            ->assertJsonStructure([\'user\', \'token\'])\n            ->assertJsonPath(\'user.role\', \'buyer\');\n\n        $this->assertDatabaseHas(\'users\', [\'email\' => \'jane@example.com\']);\n    }\n\n    public function test_seller_registers_immediately_active(): void\n    {\n        // No subscription/plan step anymore — sellers are immediately\n        // active and usable right after registering.\n        $response = $this->postJson(\'/api/register\', [\n            \'name\' => \'John Seller\',\n            \'business_name\' => \'Fresh Fish Co\',\n            \'email\' => \'john@example.com\',\n            \'password\' => \'Password123!\',\n            \'password_confirmation\' => \'Password123!\',\n            \'role\' => \'seller\',\n        ]);\n\n        $response->assertStatus(201)\n            ->assertJsonPath(\'user.subscription_status\', \'active\')\n            ->assertJsonPath(\'user.business_name\', \'Fresh Fish Co\');\n    }\n\n    public function test_name_and_business_name_are_auto_capitalized(): void\n    {\n        $response = $this->postJson(\'/api/register\', [\n            \'name\' => \'john seller\',\n            \'business_name\' => \'fresh fish co\',\n            \'email\' => \'autocap@example.com\',\n            \'password\' => \'Password123!\',\n            \'password_confirmation\' => \'Password123!\',\n            \'role\' => \'seller\',\n        ]);\n\n        $response->assertStatus(201)\n            ->assertJsonPath(\'user.name\', \'John Seller\')\n            ->assertJsonPath(\'user.business_name\', \'Fresh Fish Co\');\n    }\n\n    public function test_registration_rejects_weak_password_without_special_character(): void\n    {\n        $response = $this->postJson(\'/api/register\', [\n            \'name\' => \'Weak Pass\',\n            \'email\' => \'weak@example.com\',\n            \'password\' => \'password123\', // letters + numbers, no special char\n            \'password_confirmation\' => \'password123\',\n            \'role\' => \'buyer\',\n        ]);\n\n        $response->assertStatus(422);\n    }\n\n    public function test_registration_rejects_invalid_role(): void\n    {\n        $response = $this->postJson(\'/api/register\', [\n            \'name\' => \'Bad Role\',\n            \'email\' => \'badrole@example.com\',\n            \'password\' => \'Password123!\',\n            \'password_confirmation\' => \'Password123!\',\n            \'role\' => \'admin\', // not allowed at registration\n        ]);\n\n        $response->assertStatus(422);\n    }\n\n    public function test_registration_fails_with_duplicate_email(): void\n    {\n        User::factory()->create([\'email\' => \'taken@example.com\']);\n\n        $response = $this->postJson(\'/api/register\', [\n            \'name\' => \'Duplicate\',\n            \'email\' => \'taken@example.com\',\n            \'password\' => \'Password123!\',\n            \'password_confirmation\' => \'Password123!\',\n            \'role\' => \'buyer\',\n        ]);\n\n        $response->assertStatus(422);\n    }\n\n    public function test_user_can_login_with_correct_credentials(): void\n    {\n        User::factory()->create([\n            \'email\' => \'login@example.com\',\n            \'password\' => bcrypt(\'mypassword\'),\n        ]);\n\n        $response = $this->postJson(\'/api/login\', [\n            \'email\' => \'login@example.com\',\n            \'password\' => \'mypassword\',\n        ]);\n\n        $response->assertStatus(200)\n            ->assertJsonStructure([\'user\', \'token\']);\n    }\n\n    public function test_login_fails_with_wrong_password(): void\n    {\n        User::factory()->create([\n            \'email\' => \'wrongpass@example.com\',\n            \'password\' => bcrypt(\'correctpassword\'),\n        ]);\n\n        $response = $this->postJson(\'/api/login\', [\n            \'email\' => \'wrongpass@example.com\',\n            \'password\' => \'wrongpassword\',\n        ]);\n\n        $response->assertStatus(401)\n            ->assertJson([\'message\' => \'Invalid credentials\']);\n    }\n\n    public function test_login_fails_for_nonexistent_user(): void\n    {\n        $response = $this->postJson(\'/api/login\', [\n            \'email\' => \'doesnotexist@example.com\',\n            \'password\' => \'whatever\',\n        ]);\n\n        $response->assertStatus(401);\n    }\n\n    public function test_authenticated_user_can_fetch_own_profile(): void\n    {\n        $user = User::factory()->create();\n\n        $response = $this->actingAs($user, \'sanctum\')->getJson(\'/api/me\');\n\n        $response->assertStatus(200)\n            ->assertJsonPath(\'id\', $user->id);\n    }\n\n    public function test_guest_cannot_access_protected_route(): void\n    {\n        $response = $this->getJson(\'/api/me\');\n\n        $response->assertStatus(401);\n    }\n\n    public function test_user_can_logout(): void\n    {\n        $user = User::factory()->create();\n        $token = $user->createToken(\'test\')->plainTextToken;\n\n        $response = $this->withHeader(\'Authorization\', "Bearer {$token}")\n            ->postJson(\'/api/logout\');\n\n        $response->assertStatus(200);\n    }\n}\n',
+    'frontend/src/utils/currency.js': '/**\n * Formats a number as Tanzanian Shillings, e.g. formatTsh(15000) -> "Tsh 15,000.00"\n * Replaces the previous "TZS 15,000" (no decimals) format used inconsistently\n * across the app.\n */\nexport function formatTsh(amount) {\n  const num = Number(amount) || 0\n  return `Tsh ${num.toLocaleString(\'en-US\', {\n    minimumFractionDigits: 2,\n    maximumFractionDigits: 2,\n  })}`\n}\n',
+    'frontend/src/store/uiStore.js': "import { create } from 'zustand'\n\n// Controls which auth modal (if any) is currently shown.\n// modal: null | 'login' | 'signup-choice' | 'signup-seller' | 'signup-buyer'\nexport const useUIStore = create((set) => ({\n  modal: null,\n  openLogin: () => set({ modal: 'login' }),\n  openSignupChoice: () => set({ modal: 'signup-choice' }),\n  openSignupSeller: () => set({ modal: 'signup-seller' }),\n  openSignupBuyer: () => set({ modal: 'signup-buyer' }),\n  closeModal: () => set({ modal: null }),\n}))\n",
+    'frontend/src/components/ErrorBoundary.jsx': 'import { Component } from \'react\'\nimport { AlertTriangle } from \'lucide-react\'\n\nexport default class ErrorBoundary extends Component {\n  constructor(props) {\n    super(props)\n    this.state = { hasError: false }\n  }\n\n  static getDerivedStateFromError() {\n    return { hasError: true }\n  }\n\n  componentDidCatch(error, info) {\n    // Logged for debugging — does not block the fallback UI below.\n    console.error(\'SmartFish ErrorBoundary caught:\', error, info)\n  }\n\n  handleRetry = () => {\n    this.setState({ hasError: false })\n    window.location.reload()\n  }\n\n  render() {\n    if (this.state.hasError) {\n      return (\n        <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">\n          <div className="text-center max-w-md">\n            <AlertTriangle className="w-12 h-12 text-yellow-500 mx-auto mb-4" />\n            <h1 className="text-xl font-bold text-gray-800 mb-2">\n              Something went wrong\n            </h1>\n            <p className="text-gray-500 mb-6">\n              The app hit an unexpected error. This can happen if the\n              backend server was asleep or unreachable. Try reloading —\n              if it keeps happening, the backend may need attention.\n            </p>\n            <button\n              onClick={this.handleRetry}\n              className="bg-blue-700 hover:bg-blue-800 text-white font-semibold px-6 py-2.5 rounded-lg"\n            >\n              Reload Page\n            </button>\n          </div>\n        </div>\n      )\n    }\n\n    return this.props.children\n  }\n}\n',
+    'frontend/src/components/layout/Navbar.jsx': 'import { Link, useNavigate } from \'react-router-dom\'\nimport { Fish } from \'lucide-react\'\nimport { useAuthStore } from \'../../store/authStore\'\nimport { useUIStore } from \'../../store/uiStore\'\nimport { logout } from \'../../api/auth\'\n\nexport default function Navbar() {\n  const { user, clearAuth } = useAuthStore()\n  const { openLogin, openSignupChoice } = useUIStore()\n  const navigate = useNavigate()\n\n  const handleLogout = async () => {\n    await logout().catch(() => {})\n    clearAuth()\n    navigate(\'/\')\n  }\n\n  return (\n    <header className="flex justify-between items-center px-8 py-4 bg-blue-700 text-white sticky top-0 z-40 shadow">\n      <Link to="/" className="text-xl font-bold flex items-center gap-2">\n        <Fish className="w-6 h-6" /> SmartFish\n      </Link>\n\n      <nav className="flex items-center gap-6">\n        <Link to="/" className="hover:text-blue-200 font-medium">Home</Link>\n\n        {user ? (\n          <>\n            <Link to="/dashboard" className="hover:text-blue-200 font-medium">Dashboard</Link>\n            {user.role === \'admin\' && (\n              <Link to="/admin" className="hover:text-blue-200 font-medium">Admin</Link>\n            )}\n            <button\n              onClick={handleLogout}\n              className="bg-white text-blue-700 font-semibold px-4 py-1.5 rounded-lg hover:bg-blue-50"\n            >\n              Logout\n            </button>\n          </>\n        ) : (\n          <>\n            <button onClick={openLogin} className="hover:text-blue-200 font-medium">\n              Login\n            </button>\n            <button\n              onClick={openSignupChoice}\n              className="bg-white text-blue-700 font-semibold px-4 py-1.5 rounded-lg hover:bg-blue-50"\n            >\n              Sign Up\n            </button>\n          </>\n        )}\n      </nav>\n    </header>\n  )\n}\n',
+    'frontend/src/components/auth/PasswordStrengthIndicator.jsx': 'import { Check, X } from \'lucide-react\'\n\n/**\n * Live password strength checklist — shown while typing, matches the\n * backend\'s validation rule exactly: letters + numbers + special char,\n * minimum 8 characters.\n */\nexport function getPasswordChecks(password) {\n  return {\n    length: password.length >= 8,\n    letter: /[a-zA-Z]/.test(password),\n    number: /\\d/.test(password),\n    special: /[^a-zA-Z\\d]/.test(password),\n  }\n}\n\nexport function isPasswordStrong(password) {\n  const checks = getPasswordChecks(password)\n  return Object.values(checks).every(Boolean)\n}\n\nexport default function PasswordStrengthIndicator({ password }) {\n  if (!password) return null\n\n  const checks = getPasswordChecks(password)\n  const rules = [\n    { key: \'length\', label: \'At least 8 characters\' },\n    { key: \'letter\', label: \'Contains a letter\' },\n    { key: \'number\', label: \'Contains a number\' },\n    { key: \'special\', label: \'Contains a special character (!@#$ etc.)\' },\n  ]\n\n  return (\n    <div className="bg-gray-50 rounded-lg p-3 space-y-1 -mt-1">\n      {rules.map((rule) => (\n        <div\n          key={rule.key}\n          className={`flex items-center gap-2 text-xs ${\n            checks[rule.key] ? \'text-green-600\' : \'text-gray-400\'\n          }`}\n        >\n          {checks[rule.key] ? (\n            <Check className="w-3.5 h-3.5 flex-shrink-0" />\n          ) : (\n            <X className="w-3.5 h-3.5 flex-shrink-0" />\n          )}\n          {rule.label}\n        </div>\n      ))}\n    </div>\n  )\n}\n',
+    'frontend/src/components/auth/LoginModal.jsx': 'import { useState } from \'react\'\nimport { useNavigate } from \'react-router-dom\'\nimport toast from \'react-hot-toast\'\nimport { Fish, Mail, Lock } from \'lucide-react\'\nimport ModalShell from \'./ModalShell\'\nimport { useUIStore } from \'../../store/uiStore\'\nimport { useAuthStore } from \'../../store/authStore\'\nimport { login } from \'../../api/auth\'\n\nexport default function LoginModal() {\n  const { closeModal, openSignupChoice } = useUIStore()\n  const { setAuth } = useAuthStore()\n  const navigate = useNavigate()\n\n  const [form, setForm] = useState({ email: \'\', password: \'\' })\n  const [loading, setLoading] = useState(false)\n  const [error, setError] = useState(\'\')\n\n  const handleSubmit = async (e) => {\n    e.preventDefault()\n    setError(\'\')\n    setLoading(true)\n    try {\n      const { data } = await login(form)\n      setAuth(data.user, data.token)\n      closeModal()\n      navigate(data.user.role === \'admin\' ? \'/admin\' : \'/dashboard\')\n      toast.success(`Welcome back, ${data.user.name}!`)\n    } catch (err) {\n      setError(err.response?.data?.message || \'Invalid email or password\')\n    } finally {\n      setLoading(false)\n    }\n  }\n\n  return (\n    <ModalShell onClose={closeModal}>\n      <div className="text-center mb-6">\n        <h2 className="text-2xl font-bold text-blue-900 flex items-center justify-center gap-2">\n          <Fish className="w-6 h-6" /> SmartFish\n        </h2>\n        <p className="text-gray-500 mt-1">Log in to your account</p>\n      </div>\n\n      {error && (\n        <div className="bg-red-50 text-red-600 text-sm rounded-lg px-4 py-2 mb-4">\n          {error}\n        </div>\n      )}\n\n      <form onSubmit={handleSubmit} className="space-y-4">\n        <div className="flex items-center border border-gray-300 rounded-lg px-3 py-2.5 focus-within:ring-2 focus-within:ring-blue-400">\n          <Mail className="w-4 h-4 text-blue-600 mr-3 flex-shrink-0" />\n          <input\n            type="email"\n            required\n            placeholder="Email"\n            className="w-full outline-none"\n            value={form.email}\n            onChange={(e) => setForm({ ...form, email: e.target.value })}\n          />\n        </div>\n\n        <div className="flex items-center border border-gray-300 rounded-lg px-3 py-2.5 focus-within:ring-2 focus-within:ring-blue-400">\n          <Lock className="w-4 h-4 text-blue-600 mr-3 flex-shrink-0" />\n          <input\n            type="password"\n            required\n            placeholder="Password"\n            className="w-full outline-none"\n            value={form.password}\n            onChange={(e) => setForm({ ...form, password: e.target.value })}\n          />\n        </div>\n\n        <button\n          type="submit"\n          disabled={loading}\n          className="w-full bg-blue-700 hover:bg-blue-800 text-white font-semibold py-3 rounded-lg transition disabled:opacity-50"\n        >\n          {loading ? \'Logging in…\' : \'Login\'}\n        </button>\n      </form>\n\n      <p className="text-center text-sm text-gray-500 mt-5">\n        Don\'t have an account?{\' \'}\n        <button\n          onClick={openSignupChoice}\n          className="text-blue-700 font-semibold hover:underline"\n        >\n          Sign up\n        </button>\n      </p>\n    </ModalShell>\n  )\n}\n',
+    'frontend/src/components/auth/SignupChoiceModal.jsx': 'import { Fish, ShoppingCart } from \'lucide-react\'\nimport ModalShell from \'./ModalShell\'\nimport { useUIStore } from \'../../store/uiStore\'\n\nexport default function SignupChoiceModal() {\n  const { closeModal, openSignupSeller, openSignupBuyer, openLogin } = useUIStore()\n\n  return (\n    <ModalShell onClose={closeModal}>\n      <div className="text-center mb-6">\n        <h2 className="text-2xl font-bold text-blue-900">Join SmartFish</h2>\n        <p className="text-gray-500 mt-1">Choose how you want to use the platform</p>\n      </div>\n\n      <div className="grid gap-4">\n        <button\n          onClick={openSignupSeller}\n          className="border-2 border-blue-600 rounded-xl p-5 text-left hover:bg-blue-50 transition group"\n        >\n          <div className="flex items-center gap-3">\n            <Fish className="w-8 h-8 text-blue-600 flex-shrink-0" />\n            <div>\n              <h3 className="font-bold text-blue-900 group-hover:text-blue-700">\n                Create Seller Account\n              </h3>\n              <p className="text-sm text-gray-500">\n                List your fish stock and reach buyers directly\n              </p>\n            </div>\n          </div>\n        </button>\n\n        <button\n          onClick={openSignupBuyer}\n          className="border-2 border-blue-600 rounded-xl p-5 text-left hover:bg-blue-50 transition group"\n        >\n          <div className="flex items-center gap-3">\n            <ShoppingCart className="w-8 h-8 text-blue-600 flex-shrink-0" />\n            <div>\n              <h3 className="font-bold text-blue-900 group-hover:text-blue-700">\n                Create Buyer Account\n              </h3>\n              <p className="text-sm text-gray-500">\n                Browse sellers and order fresh fish\n              </p>\n            </div>\n          </div>\n        </button>\n      </div>\n\n      <p className="text-center text-sm text-gray-500 mt-6">\n        Already have an account?{\' \'}\n        <button onClick={openLogin} className="text-blue-700 font-semibold hover:underline">\n          Log in\n        </button>\n      </p>\n    </ModalShell>\n  )\n}\n',
+    'frontend/src/components/auth/SellerSignupModal.jsx': 'import { useState } from \'react\'\nimport { useNavigate } from \'react-router-dom\'\nimport toast from \'react-hot-toast\'\nimport { User, Store, MapPin, Mail, Phone, Lock } from \'lucide-react\'\nimport ModalShell from \'./ModalShell\'\nimport { useUIStore } from \'../../store/uiStore\'\nimport { useAuthStore } from \'../../store/authStore\'\nimport { register } from \'../../api/auth\'\nimport PasswordStrengthIndicator, { isPasswordStrong } from \'./PasswordStrengthIndicator\'\n\nexport default function SellerSignupModal() {\n  const { closeModal, openLogin } = useUIStore()\n  const { setAuth } = useAuthStore()\n  const navigate = useNavigate()\n\n  const [form, setForm] = useState({\n    name: \'\',\n    business_name: \'\',\n    location: \'\',\n    email: \'\',\n    phone: \'+255\',\n    password: \'\',\n    password_confirmation: \'\',\n  })\n  const [loading, setLoading] = useState(false)\n  const [error, setError] = useState(\'\')\n\n  const update = (field) => (e) => setForm({ ...form, [field]: e.target.value })\n\n  const handlePhoneChange = (e) => {\n    let val = e.target.value\n    if (!val.startsWith(\'+255\')) val = \'+255\'\n    setForm({ ...form, phone: val })\n  }\n\n  const handleSubmit = async (e) => {\n    e.preventDefault()\n    setError(\'\')\n\n    if (!form.name || !form.business_name || !form.location || !form.email || !form.password) {\n      setError(\'Please fill in all fields\')\n      return\n    }\n    if (form.password !== form.password_confirmation) {\n      setError(\'Passwords do not match\')\n      return\n    }\n    if (!isPasswordStrong(form.password)) {\n      setError(\'Password must contain letters, numbers, and a special character\')\n      return\n    }\n\n    setLoading(true)\n    try {\n      // No subscription/plan step — this is a research/testing build,\n      // not a live payment system. Sellers are immediately active.\n      const { data } = await register({\n        name: form.name,\n        business_name: form.business_name,\n        email: form.email,\n        password: form.password,\n        password_confirmation: form.password_confirmation,\n        role: \'seller\',\n        phone: form.phone,\n        location: form.location,\n        office_address: form.location,\n      })\n\n      setAuth(data.user, data.token)\n      closeModal()\n      toast.success(`Welcome to SmartFish, ${data.user.business_name || data.user.name}!`)\n      navigate(\'/dashboard\')\n    } catch (err) {\n      setError(err.response?.data?.message || \'Something went wrong. Please try again.\')\n    } finally {\n      setLoading(false)\n    }\n  }\n\n  return (\n    <ModalShell onClose={closeModal}>\n      <div className="text-center mb-6">\n        <h2 className="text-2xl font-bold text-blue-900">Create Seller Account</h2>\n        <p className="text-gray-500 mt-1">Your business details</p>\n      </div>\n\n      {error && (\n        <div className="bg-red-50 text-red-600 text-sm rounded-lg px-4 py-2 mb-4">\n          {error}\n        </div>\n      )}\n\n      <form onSubmit={handleSubmit} className="space-y-3">\n        <Field icon={User} placeholder="Full Name" value={form.name} onChange={update(\'name\')} />\n        <Field\n          icon={Store}\n          placeholder="Business / Brand Name"\n          value={form.business_name}\n          onChange={update(\'business_name\')}\n        />\n        <Field\n          icon={MapPin}\n          placeholder="Physical Address / Location"\n          value={form.location}\n          onChange={update(\'location\')}\n        />\n        <Field\n          icon={Mail}\n          type="email"\n          placeholder="Email"\n          value={form.email}\n          onChange={update(\'email\')}\n        />\n        <Field\n          icon={Phone}\n          placeholder="+255 7XX XXX XXX"\n          value={form.phone}\n          onChange={handlePhoneChange}\n        />\n        <Field\n          icon={Lock}\n          type="password"\n          placeholder="Password"\n          value={form.password}\n          onChange={update(\'password\')}\n        />\n        <PasswordStrengthIndicator password={form.password} />\n        <Field\n          icon={Lock}\n          type="password"\n          placeholder="Confirm Password"\n          value={form.password_confirmation}\n          onChange={update(\'password_confirmation\')}\n        />\n\n        <button\n          type="submit"\n          disabled={loading}\n          className="w-full bg-blue-700 hover:bg-blue-800 text-white font-semibold py-3 rounded-lg transition mt-2 disabled:opacity-50"\n        >\n          {loading ? \'Creating account…\' : \'Create Account\'}\n        </button>\n      </form>\n\n      <p className="text-center text-sm text-gray-500 mt-5">\n        Already have an account?{\' \'}\n        <button onClick={openLogin} className="text-blue-700 font-semibold hover:underline">\n          Log in\n        </button>\n      </p>\n    </ModalShell>\n  )\n}\n\nfunction Field({ icon: Icon, type = \'text\', placeholder, value, onChange }) {\n  return (\n    <div className="flex items-center border border-gray-300 rounded-lg px-3 py-2.5 focus-within:ring-2 focus-within:ring-blue-400">\n      <Icon className="w-4 h-4 text-blue-600 mr-3 flex-shrink-0" />\n      <input\n        type={type}\n        required\n        placeholder={placeholder}\n        className="w-full outline-none text-sm"\n        value={value}\n        onChange={onChange}\n      />\n    </div>\n  )\n}\n',
+    'frontend/src/components/auth/BuyerSignupModal.jsx': 'import { useState } from \'react\'\nimport { useNavigate } from \'react-router-dom\'\nimport toast from \'react-hot-toast\'\nimport { User, Phone, Mail, Lock } from \'lucide-react\'\nimport ModalShell from \'./ModalShell\'\nimport { useUIStore } from \'../../store/uiStore\'\nimport { useAuthStore } from \'../../store/authStore\'\nimport { register } from \'../../api/auth\'\nimport PasswordStrengthIndicator, { isPasswordStrong } from \'./PasswordStrengthIndicator\'\n\nexport default function BuyerSignupModal() {\n  const { closeModal, openLogin } = useUIStore()\n  const { setAuth } = useAuthStore()\n  const navigate = useNavigate()\n\n  const [form, setForm] = useState({\n    name: \'\',\n    phone: \'+255\',\n    email: \'\',\n    password: \'\',\n    password_confirmation: \'\',\n  })\n  const [loading, setLoading] = useState(false)\n  const [error, setError] = useState(\'\')\n\n  const update = (field) => (e) => setForm({ ...form, [field]: e.target.value })\n\n  const handlePhoneChange = (e) => {\n    let val = e.target.value\n    if (!val.startsWith(\'+255\')) val = \'+255\'\n    setForm({ ...form, phone: val })\n  }\n\n  const handleSubmit = async (e) => {\n    e.preventDefault()\n    setError(\'\')\n\n    if (!form.name || !form.email || !form.password) {\n      setError(\'Please fill in all fields\')\n      return\n    }\n    if (form.password !== form.password_confirmation) {\n      setError(\'Passwords do not match\')\n      return\n    }\n    if (!isPasswordStrong(form.password)) {\n      setError(\'Password must contain letters, numbers, and a special character\')\n      return\n    }\n\n    setLoading(true)\n    try {\n      const { data } = await register({\n        name: form.name,\n        email: form.email,\n        password: form.password,\n        password_confirmation: form.password_confirmation,\n        role: \'buyer\',\n        phone: form.phone,\n      })\n      setAuth(data.user, data.token)\n      closeModal()\n      toast.success(`Welcome to SmartFish, ${data.user.name}!`)\n      navigate(\'/dashboard\')\n    } catch (err) {\n      setError(err.response?.data?.message || \'Something went wrong. Please try again.\')\n    } finally {\n      setLoading(false)\n    }\n  }\n\n  return (\n    <ModalShell onClose={closeModal}>\n      <div className="text-center mb-6">\n        <h2 className="text-2xl font-bold text-blue-900">Create Buyer Account</h2>\n        <p className="text-gray-500 mt-1">Browse sellers and order fresh fish</p>\n      </div>\n\n      {error && (\n        <div className="bg-red-50 text-red-600 text-sm rounded-lg px-4 py-2 mb-4">\n          {error}\n        </div>\n      )}\n\n      <form onSubmit={handleSubmit} className="space-y-3">\n        <Field icon={User} placeholder="Full Name" value={form.name} onChange={update(\'name\')} />\n        <Field\n          icon={Phone}\n          placeholder="+255 7XX XXX XXX"\n          value={form.phone}\n          onChange={handlePhoneChange}\n        />\n        <Field\n          icon={Mail}\n          type="email"\n          placeholder="Email"\n          value={form.email}\n          onChange={update(\'email\')}\n        />\n        <Field\n          icon={Lock}\n          type="password"\n          placeholder="Password"\n          value={form.password}\n          onChange={update(\'password\')}\n        />\n        <PasswordStrengthIndicator password={form.password} />\n        <Field\n          icon={Lock}\n          type="password"\n          placeholder="Confirm Password"\n          value={form.password_confirmation}\n          onChange={update(\'password_confirmation\')}\n        />\n\n        <button\n          type="submit"\n          disabled={loading}\n          className="w-full bg-blue-700 hover:bg-blue-800 text-white font-semibold py-3 rounded-lg transition mt-2 disabled:opacity-50"\n        >\n          {loading ? \'Creating account…\' : \'Create Account\'}\n        </button>\n      </form>\n\n      <p className="text-center text-sm text-gray-500 mt-5">\n        Already have an account?{\' \'}\n        <button onClick={openLogin} className="text-blue-700 font-semibold hover:underline">\n          Log in\n        </button>\n      </p>\n    </ModalShell>\n  )\n}\n\nfunction Field({ icon: Icon, type = \'text\', placeholder, value, onChange }) {\n  return (\n    <div className="flex items-center border border-gray-300 rounded-lg px-3 py-2.5 focus-within:ring-2 focus-within:ring-blue-400">\n      <Icon className="w-4 h-4 text-blue-600 mr-3 flex-shrink-0" />\n      <input\n        type={type}\n        required\n        placeholder={placeholder}\n        className="w-full outline-none text-sm"\n        value={value}\n        onChange={onChange}\n      />\n    </div>\n  )\n}\n',
+    'frontend/src/components/sellers/SellerCard.jsx': 'import { Link } from \'react-router-dom\'\nimport { Fish, MapPin } from \'lucide-react\'\n\nexport default function SellerCard({ seller }) {\n  return (\n    <div className="bg-white rounded-2xl shadow p-5 hover:shadow-md transition flex flex-col gap-3">\n      <div className="flex items-center gap-3">\n        {seller.brand_logo\n          ? <img\n              src={seller.brand_logo.startsWith(\'data:\') ? seller.brand_logo : `/storage/${seller.brand_logo}`}\n              alt={seller.name}\n              className="w-14 h-14 rounded-full object-cover border"\n            />\n          : <div className="w-14 h-14 rounded-full bg-blue-100 flex items-center justify-center">\n              <Fish className="w-6 h-6 text-blue-600" />\n            </div>\n        }\n        <div>\n          <h3 className="font-bold text-blue-900 text-lg">{seller.name}</h3>\n          <p className="text-gray-500 text-sm flex items-center gap-1">\n            <MapPin className="w-3.5 h-3.5" /> {seller.location_address || seller.location}\n          </p>\n        </div>\n      </div>\n      <p className="text-gray-600 text-sm">{seller.office_address}</p>\n      <div className="flex items-center justify-between mt-auto">\n        <span className="text-sm text-blue-600">{seller.fish_stocks_count} items</span>\n        <Link to={`/sellers/${seller.id}`}\n          className="bg-blue-600 text-white px-4 py-1.5 rounded-lg text-sm hover:bg-blue-700">\n          View Shop\n        </Link>\n      </div>\n    </div>\n  )\n}\n',
+    'frontend/src/components/orders/OrderModal.jsx': 'import { useState } from \'react\'\nimport { Smartphone, Landmark } from \'lucide-react\'\nimport { placeOrder, payOrder } from \'../../api/orders\'\nimport { formatTsh } from \'../../utils/currency\'\nimport toast from \'react-hot-toast\'\n\nexport default function OrderModal({ data: { stock, seller, agencies }, onClose }) {\n  const [qty, setQty]       = useState(1)\n  const [agency, setAgency] = useState(\'\')\n  const [method, setMethod] = useState(\'mobile\')\n  const [loading, setLoading] = useState(false)\n\n  const total = (qty * stock.price_per_kg).toFixed(2)\n\n  const handleOrder = async () => {\n    if (!agency) return toast.error(\'Choose a delivery agency\')\n    setLoading(true)\n    try {\n      const { data: order } = await placeOrder({\n        seller_id: seller.id,\n        items: [{ stock_id: stock.id, quantity_kg: qty }],\n        payment_method: method,\n        agency_id: agency,\n      })\n      await payOrder(order.id)   // mark as paid immediately (demo flow)\n      toast.success(\'Order placed & payment recorded!\')\n      onClose()\n    } catch (e) {\n      toast.error(e.response?.data?.message || \'Order failed\')\n    } finally {\n      setLoading(false)\n    }\n  }\n\n  return (\n    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">\n      <div className="bg-white rounded-2xl p-6 w-full max-w-md shadow-xl">\n        <h2 className="text-xl font-bold mb-4">Place Order – {stock.fish_name}</h2>\n\n        <label className="block text-sm mb-1">Quantity (kg)</label>\n        <input type="number" min="0.1" max={stock.quantity_kg} step="0.1"\n          value={qty} onChange={e => setQty(Number(e.target.value))}\n          className="input mb-4" />\n\n        <label className="block text-sm mb-1">Delivery Agency</label>\n        <select value={agency} onChange={e => setAgency(e.target.value)} className="input mb-4">\n          <option value="">Select agency…</option>\n          {agencies.map(a => <option key={a.id} value={a.id}>{a.agency_name} – {a.area_covered}</option>)}\n        </select>\n\n        <label className="block text-sm mb-1">Payment Method</label>\n        <div className="flex gap-4 mb-6">\n          <label className="flex items-center gap-2 cursor-pointer">\n            <input type="radio" value="mobile" checked={method === \'mobile\'} onChange={() => setMethod(\'mobile\')} />\n            <Smartphone className="w-4 h-4" /> Mobile Money\n          </label>\n          <label className="flex items-center gap-2 cursor-pointer">\n            <input type="radio" value="bank" checked={method === \'bank\'} onChange={() => setMethod(\'bank\')} />\n            <Landmark className="w-4 h-4" /> Bank Transfer\n          </label>\n        </div>\n\n        <div className="bg-blue-50 rounded-lg p-3 mb-4">\n          <p className="font-semibold text-blue-900">Total: {formatTsh(total)}</p>\n        </div>\n\n        <div className="flex gap-3">\n          <button onClick={onClose} className="flex-1 border border-gray-300 rounded-lg py-2">Cancel</button>\n          <button onClick={handleOrder} disabled={loading}\n            className="flex-1 bg-blue-600 text-white rounded-lg py-2 hover:bg-blue-700 disabled:opacity-50">\n            {loading ? \'Placing…\' : \'Confirm Order\'}\n          </button>\n        </div>\n      </div>\n    </div>\n  )\n}\n',
+    'frontend/src/pages/market/SellerPage.jsx': 'import { useParams } from \'react-router-dom\'\nimport { useQuery } from \'@tanstack/react-query\'\nimport { Fish, Building2, MapPin } from \'lucide-react\'\nimport { getSeller } from \'../../api/sellers\'\nimport { useAuthStore } from \'../../store/authStore\'\nimport { formatTsh } from \'../../utils/currency\'\nimport OrderModal from \'../../components/orders/OrderModal\'\nimport { useState } from \'react\'\n\nexport default function SellerPage() {\n  const { id } = useParams()\n  const { user } = useAuthStore()\n  const [orderItem, setOrderItem] = useState(null)\n\n  const { data, isLoading } = useQuery({\n    queryKey: [\'seller\', id],\n    queryFn: () => getSeller(id).then(r => r.data),\n  })\n\n  if (isLoading) return <div className="p-8">Loading seller…</div>\n\n  const { seller, stocks, agencies } = data\n\n  return (\n    <div className="container mx-auto px-4 py-8">\n      {/* Seller Hero */}\n      <div className="bg-white rounded-2xl shadow p-6 mb-8 flex gap-6 items-center">\n        {seller.brand_logo\n          ? <img\n              src={seller.brand_logo.startsWith(\'data:\') ? seller.brand_logo : `/storage/${seller.brand_logo}`}\n              className="w-24 h-24 rounded-full object-cover border-4 border-blue-200"\n            />\n          : <div className="w-24 h-24 rounded-full bg-blue-100 flex items-center justify-center">\n              <Fish className="w-10 h-10 text-blue-600" />\n            </div>\n        }\n        <div>\n          <h1 className="text-2xl font-bold text-blue-900">{seller.name}</h1>\n          <p className="text-gray-500 flex items-center gap-1.5">\n            <Building2 className="w-4 h-4" /> {seller.office_address}\n          </p>\n          <p className="text-gray-500 flex items-center gap-1.5">\n            <MapPin className="w-4 h-4" /> {seller.location_address}\n          </p>\n          {seller.bio && <p className="text-gray-600 mt-2">{seller.bio}</p>}\n        </div>\n      </div>\n\n      {/* Fish Stock Grid */}\n      <h2 className="text-xl font-bold text-blue-800 mb-4">Available Fish</h2>\n      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5 mb-8">\n        {stocks.map(stock => (\n          <div key={stock.id} className="bg-white rounded-xl shadow p-4">\n            {stock.image && (\n              <img\n                src={stock.image.startsWith(\'data:\') ? stock.image : `/storage/${stock.image}`}\n                className="w-full h-36 object-cover rounded-lg mb-3"\n              />\n            )}\n            <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">{stock.category?.name}</span>\n            <h3 className="font-semibold text-blue-900 mt-1">{stock.fish_name}</h3>\n            <p className="text-gray-600 text-sm">{stock.quantity_kg} kg available</p>\n            <p className="text-blue-700 font-bold">{formatTsh(stock.price_per_kg)} / kg</p>\n            {user && (\n              <button onClick={() => setOrderItem({ stock, seller, agencies })}\n                className="mt-3 w-full bg-blue-600 text-white py-1.5 rounded-lg hover:bg-blue-700 text-sm">\n                Order Now\n              </button>\n            )}\n          </div>\n        ))}\n      </div>\n\n      {orderItem && (\n        <OrderModal data={orderItem} onClose={() => setOrderItem(null)} />\n      )}\n    </div>\n  )\n}\n',
+    'frontend/src/pages/dashboard/SellerDashboard.jsx': 'import { useState } from \'react\'\nimport { useQuery, useMutation, useQueryClient } from \'@tanstack/react-query\'\nimport toast from \'react-hot-toast\'\nimport client from \'../../api/client\'\nimport { getOrders, confirmOrder } from \'../../api/orders\'\nimport { getStocks, deleteStock } from \'../../api/stocks\'\nimport { useAuthStore } from \'../../store/authStore\'\nimport { formatTsh } from \'../../utils/currency\'\nimport DashboardLayout from \'../../components/dashboard/DashboardLayout\'\nimport ChangePasswordModal from \'../../components/dashboard/ChangePasswordModal\'\nimport ModalShell from \'../../components/auth/ModalShell\'\nimport AddStockForm from \'../../components/stocks/AddStockForm\'\nimport {\n  HomeIcon, ClipboardListIcon, PackageIcon, ContactIcon, TruckIcon, LockIcon, LogoutIcon,\n} from \'../../components/dashboard/Icons\'\n\nconst SECTIONS = [\n  { key: \'home\', label: \'Home\', icon: HomeIcon },\n  { key: \'orders\', label: \'Manage Orders\', icon: ClipboardListIcon },\n  { key: \'stocks\', label: \'Manage Stocks\', icon: PackageIcon },\n  { key: \'buyers\', label: \'Manage Buyers\', icon: ContactIcon },\n  { key: \'agencies\', label: \'Delivery Partners\', icon: TruckIcon },\n  { key: \'password\', label: \'Change Password\', icon: LockIcon },\n  { key: \'logout\', label: \'Logout\', icon: LogoutIcon },\n]\n\nexport default function SellerDashboard() {\n  const [active, setActive] = useState(\'home\')\n  const [showPasswordModal, setShowPasswordModal] = useState(false)\n  const { clearAuth } = useAuthStore()\n\n  const handleSelect = (key) => {\n    if (key === \'logout\') {\n      clearAuth()\n      window.location.href = \'/\'\n      return\n    }\n    if (key === \'password\') {\n      setShowPasswordModal(true)\n      return\n    }\n    setActive(key)\n  }\n\n  return (\n    <>\n      <DashboardLayout items={SECTIONS} activeKey={active} onSelect={handleSelect}>\n        {active === \'home\' && <HomePanel />}\n        {active === \'orders\' && <OrdersPanel />}\n        {active === \'stocks\' && <StocksPanel />}\n        {active === \'buyers\' && <BuyersPanel />}\n        {active === \'agencies\' && <AgenciesPanel />}\n      </DashboardLayout>\n\n      {showPasswordModal && (\n        <ChangePasswordModal onClose={() => setShowPasswordModal(false)} />\n      )}\n    </>\n  )\n}\n\n// ── HOME — quick overview + profile/brand logo setup ───────────────\nfunction HomePanel() {\n  const { user, setAuth } = useAuthStore()\n  const [logoFile, setLogoFile] = useState(null)\n  const [logoPreview, setLogoPreview] = useState(null)\n\n  const { data: orders } = useQuery({\n    queryKey: [\'seller-orders\'],\n    queryFn: () => getOrders().then((r) => r.data),\n  })\n  const { data: stocks } = useQuery({\n    queryKey: [\'seller-stocks\'],\n    queryFn: () => getStocks({}).then((r) => r.data),\n  })\n\n  const pendingCount = orders?.data?.filter((o) => o.status === \'pending\' || o.status === \'received\').length ?? 0\n  const stockCount = stocks?.data?.length ?? 0\n\n  const handleLogoChange = (e) => {\n    const file = e.target.files[0]\n    setLogoFile(file)\n    setLogoPreview(file ? URL.createObjectURL(file) : null)\n  }\n\n  const uploadLogo = useMutation({\n    mutationFn: () => {\n      const fd = new FormData()\n      fd.append(\'brand_logo\', logoFile)\n      return client.put(\'/seller/profile\', fd, {\n        headers: { \'Content-Type\': \'multipart/form-data\' },\n      })\n    },\n    onSuccess: (res) => {\n      toast.success(\'Brand logo updated\')\n      setAuth(res.data, useAuthStore.getState().token)\n      setLogoFile(null)\n      setLogoPreview(null)\n    },\n    onError: () => toast.error(\'Failed to upload logo\'),\n  })\n\n  return (\n    <div>\n      <h1 className="text-2xl font-bold text-blue-900 mb-6">Welcome back</h1>\n\n      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">\n        <StatCard label="Pending Orders" value={pendingCount} />\n        <StatCard label="Active Stock Items" value={stockCount} />\n        <StatCard label="Total Orders" value={orders?.data?.length ?? 0} />\n      </div>\n\n      <div className="bg-white rounded-xl shadow p-5 max-w-md">\n        <h2 className="font-bold text-blue-900 mb-3">Business Brand Logo</h2>\n        <div className="flex items-center gap-4">\n          <div className="w-20 h-20 rounded-full border-2 border-dashed border-gray-300 flex items-center justify-center overflow-hidden bg-gray-50 flex-shrink-0">\n            {logoPreview ? (\n              <img src={logoPreview} alt="Preview" className="w-full h-full object-cover" />\n            ) : user?.brand_logo ? (\n              <img src={user.brand_logo.startsWith(\'data:\') ? user.brand_logo : `/storage/${user.brand_logo}`} alt="Current logo" className="w-full h-full object-cover" />\n            ) : (\n              <span className="text-gray-400 text-xs text-center px-1">No logo</span>\n            )}\n          </div>\n          <div className="flex-1">\n            <input type="file" accept="image/*" onChange={handleLogoChange} className="input text-sm" />\n            {logoFile && (\n              <button\n                onClick={() => uploadLogo.mutate()}\n                disabled={uploadLogo.isPending}\n                className="btn-primary mt-2 text-sm py-1.5 w-full"\n              >\n                {uploadLogo.isPending ? \'Uploading…\' : \'Save Logo\'}\n              </button>\n            )}\n          </div>\n        </div>\n      </div>\n    </div>\n  )\n}\n\nfunction StatCard({ label, value }) {\n  return (\n    <div className="bg-white rounded-2xl shadow p-6 text-center">\n      <p className="text-3xl font-bold text-blue-700">{value ?? \'—\'}</p>\n      <p className="text-sm text-gray-500 mt-1">{label}</p>\n    </div>\n  )\n}\n\n// ── MANAGE ORDERS — live, polling every 15s ─────────────────────────\nfunction OrdersPanel() {\n  const qc = useQueryClient()\n\n  const { data: orders } = useQuery({\n    queryKey: [\'seller-orders\'],\n    queryFn: () => getOrders().then((r) => r.data),\n    refetchInterval: 15000,\n  })\n\n  const confirm = useMutation({\n    mutationFn: (id) => confirmOrder(id),\n    onSuccess: () => {\n      toast.success(\'Order confirmed!\')\n      qc.invalidateQueries([\'seller-orders\'])\n    },\n  })\n\n  return (\n    <div>\n      <h1 className="text-2xl font-bold text-blue-900 mb-2">Manage Orders</h1>\n      <p className="text-gray-500 text-sm mb-6">Live order updates · refreshes every 15 seconds</p>\n\n      <div className="space-y-4">\n        {orders?.data?.length ? (\n          orders.data.map((order) => (\n            <div key={order.id} className="bg-white rounded-xl shadow p-4 flex justify-between items-center flex-wrap gap-3">\n              <div>\n                <p className="font-semibold">Order #{order.id} — {order.buyer?.name}</p>\n                <p className="text-gray-500 text-sm">\n                  {formatTsh(order.total_amount)} · {order.payment_status}\n                </p>\n                <p className="text-sm capitalize">Status: {order.status}</p>\n              </div>\n              {order.payment_status === \'paid\' && order.status === \'received\' && (\n                <button\n                  onClick={() => confirm.mutate(order.id)}\n                  className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 text-sm"\n                >\n                  Confirm\n                </button>\n              )}\n            </div>\n          ))\n        ) : (\n          <p className="text-gray-400 text-center py-10">No orders yet.</p>\n        )}\n      </div>\n    </div>\n  )\n}\n\n// ── MANAGE STOCKS — dynamic responsive card grid ────────────────────\nfunction StocksPanel() {\n  const qc = useQueryClient()\n  const [showAddForm, setShowAddForm] = useState(false)\n\n  const { data: stocks } = useQuery({\n    queryKey: [\'seller-stocks\'],\n    queryFn: () => getStocks({}).then((r) => r.data),\n  })\n\n  const remove = useMutation({\n    mutationFn: (id) => deleteStock(id),\n    onSuccess: () => {\n      toast.success(\'Stock removed\')\n      qc.invalidateQueries([\'seller-stocks\'])\n    },\n  })\n\n  return (\n    <div>\n      <div className="flex items-center justify-between mb-6">\n        <h1 className="text-2xl font-bold text-blue-900">Manage Stocks</h1>\n        <button onClick={() => setShowAddForm(true)} className="btn-primary">\n          + Add New Stock\n        </button>\n      </div>\n\n      {/*\n        Dynamic responsive grid: card count per row adapts to screen\n        size automatically via Tailwind\'s grid-cols breakpoints —\n        1 col on mobile, 2 on tablet, 3 on desktop, 4 on wide screens.\n      */}\n      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">\n        {stocks?.data?.length ? (\n          stocks.data.map((s) => (\n            <div key={s.id} className="bg-white rounded-xl shadow p-4 flex flex-col">\n              {s.image && (\n                <img\n                  src={s.image.startsWith(\'data:\') ? s.image : `/storage/${s.image}`}\n                  alt={s.fish_name}\n                  className="w-full h-32 object-cover rounded-lg mb-3"\n                />\n              )}\n              <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full self-start mb-1">\n                {s.category?.name}\n              </span>\n              <p className="font-semibold">{s.fish_name}</p>\n              <p className="text-gray-500 text-sm">\n                {s.quantity_kg} kg · {formatTsh(s.price_per_kg)}/kg\n              </p>\n              <span\n                className={`text-xs mt-1 ${\n                  s.status === \'active\' ? \'text-green-600\' : \'text-red-500\'\n                }`}\n              >\n                {s.status === \'active\' ? \'● In Stock\' : \'● Out of Stock\'}\n              </span>\n              <button\n                onClick={() => remove.mutate(s.id)}\n                className="mt-3 text-red-500 text-sm hover:underline self-start"\n              >\n                Remove Stock\n              </button>\n            </div>\n          ))\n        ) : (\n          <p className="text-gray-400 col-span-full text-center py-10">\n            No stock items yet — add your first one above.\n          </p>\n        )}\n      </div>\n\n      {showAddForm && (\n        <ModalShell onClose={() => setShowAddForm(false)} maxWidth="max-w-lg">\n          <AddStockForm onDone={() => setShowAddForm(false)} />\n        </ModalShell>\n      )}\n    </div>\n  )\n}\n\n// ── MANAGE BUYERS — live buyer activity on this seller\'s platform ───\nfunction BuyersPanel() {\n  const { data: buyers } = useQuery({\n    queryKey: [\'seller-buyers\'],\n    queryFn: () => client.get(\'/seller/buyers\').then((r) => r.data),\n    refetchInterval: 15000,\n  })\n\n  return (\n    <div>\n      <h1 className="text-2xl font-bold text-blue-900 mb-2">Manage Buyers</h1>\n      <p className="text-gray-500 text-sm mb-6">\n        Buyers who have placed orders on your platform · live updates\n      </p>\n\n      <div className="bg-white rounded-xl shadow divide-y">\n        {buyers?.length ? (\n          buyers.map((b) => (\n            <div key={b.order_id} className="flex flex-wrap justify-between items-center gap-3 p-4">\n              <div>\n                <p className="font-semibold">{b.buyer_name}</p>\n                <p className="text-sm text-gray-500">{b.buyer_phone} · {b.buyer_email}</p>\n                <p className="text-xs text-gray-400 mt-1">\n                  Ordered {new Date(b.ordered_at).toLocaleString()}\n                </p>\n              </div>\n              <div className="text-right">\n                <span className="text-xs capitalize bg-blue-50 text-blue-700 px-2 py-1 rounded-full">\n                  {b.order_status}\n                </span>\n                <p className="text-xs text-gray-400 mt-1 capitalize">\n                  Delivery: {b.delivery_status}\n                </p>\n              </div>\n            </div>\n          ))\n        ) : (\n          <p className="text-gray-400 p-6 text-center">No buyers yet.</p>\n        )}\n      </div>\n    </div>\n  )\n}\n\n// ── DELIVERY PARTNERS — manage agencies ──────────────────────────────\nfunction AgenciesPanel() {\n  const qc = useQueryClient()\n  const [form, setForm] = useState({ agency_name: \'\', contact: \'\', area_covered: \'\' })\n\n  const { data: agencies } = useQuery({\n    queryKey: [\'seller-agencies\'],\n    queryFn: () => client.get(\'/agencies\').then((r) => r.data),\n  })\n\n  const addAgency = useMutation({\n    mutationFn: (data) => client.post(\'/agencies\', data),\n    onSuccess: () => {\n      toast.success(\'Delivery partner added\')\n      qc.invalidateQueries([\'seller-agencies\'])\n      setForm({ agency_name: \'\', contact: \'\', area_covered: \'\' })\n    },\n  })\n\n  const removeAgency = useMutation({\n    mutationFn: (id) => client.delete(`/agencies/${id}`),\n    onSuccess: () => {\n      toast.success(\'Delivery partner removed\')\n      qc.invalidateQueries([\'seller-agencies\'])\n    },\n  })\n\n  return (\n    <div>\n      <h1 className="text-2xl font-bold text-blue-900 mb-6">Delivery Partners</h1>\n\n      <div className="bg-white rounded-xl shadow p-5 mb-6">\n        <h2 className="font-bold text-blue-900 mb-3">Add Delivery Partner</h2>\n        <div className="grid sm:grid-cols-3 gap-3">\n          <input\n            placeholder="Agency Name" className="input"\n            value={form.agency_name}\n            onChange={(e) => setForm({ ...form, agency_name: e.target.value })}\n          />\n          <input\n            placeholder="Contact" className="input"\n            value={form.contact}\n            onChange={(e) => setForm({ ...form, contact: e.target.value })}\n          />\n          <input\n            placeholder="Area Covered" className="input"\n            value={form.area_covered}\n            onChange={(e) => setForm({ ...form, area_covered: e.target.value })}\n          />\n        </div>\n        <button\n          onClick={() => addAgency.mutate(form)}\n          disabled={!form.agency_name || addAgency.isPending}\n          className="btn-primary mt-3"\n        >\n          {addAgency.isPending ? \'Adding…\' : \'Add Partner\'}\n        </button>\n      </div>\n\n      <div className="bg-white rounded-xl shadow divide-y">\n        {agencies?.length ? (\n          agencies.map((a) => (\n            <div key={a.id} className="flex justify-between items-center p-4">\n              <div>\n                <p className="font-semibold">{a.agency_name}</p>\n                <p className="text-sm text-gray-500">{a.contact} · {a.area_covered}</p>\n              </div>\n              <button\n                onClick={() => removeAgency.mutate(a.id)}\n                className="text-red-500 text-sm hover:underline"\n              >\n                Remove\n              </button>\n            </div>\n          ))\n        ) : (\n          <p className="text-gray-400 p-6 text-center">No delivery partners yet.</p>\n        )}\n      </div>\n    </div>\n  )\n}\n',
+    'frontend/src/pages/dashboard/BuyerDashboard.jsx': 'import { useState } from \'react\'\nimport { useQuery } from \'@tanstack/react-query\'\nimport { Link } from \'react-router-dom\'\nimport { Fish, MapPin, Receipt } from \'lucide-react\'\nimport { getOrders } from \'../../api/orders\'\nimport { getSellers } from \'../../api/sellers\'\nimport { useAuthStore } from \'../../store/authStore\'\nimport { formatTsh } from \'../../utils/currency\'\nimport DashboardLayout from \'../../components/dashboard/DashboardLayout\'\nimport ChangePasswordModal from \'../../components/dashboard/ChangePasswordModal\'\nimport { HomeIcon, ClipboardListIcon, LockIcon, LogoutIcon } from \'../../components/dashboard/Icons\'\n\nconst SECTIONS = [\n  { key: \'home\', label: \'Home\', icon: HomeIcon },\n  { key: \'orders\', label: \'My Orders\', icon: ClipboardListIcon },\n  { key: \'password\', label: \'Change Password\', icon: LockIcon },\n  { key: \'logout\', label: \'Logout\', icon: LogoutIcon },\n]\n\nconst STATUS_STYLE = {\n  pending: \'bg-yellow-100 text-yellow-700\',\n  received: \'bg-blue-100 text-blue-700\',\n  confirmed: \'bg-green-100 text-green-700\',\n  processed: \'bg-gray-100 text-gray-700\',\n  cancelled: \'bg-red-100 text-red-600\',\n}\n\nexport default function BuyerDashboard() {\n  const [active, setActive] = useState(\'home\')\n  const [showPasswordModal, setShowPasswordModal] = useState(false)\n  const { clearAuth } = useAuthStore()\n\n  const handleSelect = (key) => {\n    if (key === \'logout\') {\n      clearAuth()\n      window.location.href = \'/\'\n      return\n    }\n    if (key === \'password\') {\n      setShowPasswordModal(true)\n      return\n    }\n    setActive(key)\n  }\n\n  return (\n    <>\n      <DashboardLayout items={SECTIONS} activeKey={active} onSelect={handleSelect}>\n        {active === \'home\' && <HomePanel />}\n        {active === \'orders\' && <OrdersPanel />}\n      </DashboardLayout>\n\n      {showPasswordModal && (\n        <ChangePasswordModal onClose={() => setShowPasswordModal(false)} />\n      )}\n    </>\n  )\n}\n\n// ── HOME — browse registered seller platforms ───────────────────────\nfunction HomePanel() {\n  const { data, isLoading } = useQuery({\n    queryKey: [\'buyer-home-sellers\'],\n    queryFn: () => getSellers({}).then((r) => r.data),\n  })\n\n  return (\n    <div>\n      <h1 className="text-2xl font-bold text-blue-900 mb-2">Browse Markets</h1>\n      <p className="text-gray-500 text-sm mb-6">\n        Registered seller businesses on SmartFish\n      </p>\n\n      {isLoading ? (\n        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">\n          {[...Array(4)].map((_, i) => (\n            <div key={i} className="h-40 bg-gray-100 animate-pulse rounded-2xl" />\n          ))}\n        </div>\n      ) : data?.data?.length ? (\n        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">\n          {data.data.map((seller) => (\n            <Link\n              key={seller.id}\n              to={`/sellers/${seller.id}`}\n              className="bg-white rounded-2xl shadow p-5 hover:shadow-md transition flex flex-col gap-3"\n            >\n              <div className="flex items-center gap-3">\n                {seller.brand_logo ? (\n                  <img\n                    src={seller.brand_logo.startsWith(\'data:\') ? seller.brand_logo : `/storage/${seller.brand_logo}`}\n                    alt={seller.name}\n                    className="w-14 h-14 rounded-full object-cover border"\n                  />\n                ) : (\n                  <div className="w-14 h-14 rounded-full bg-blue-100 flex items-center justify-center">\n                    <Fish className="w-6 h-6 text-blue-600" />\n                  </div>\n                )}\n                <div>\n                  <h3 className="font-bold text-blue-900">{seller.name}</h3>\n                  <p className="text-gray-500 text-sm flex items-center gap-1">\n                    <MapPin className="w-3.5 h-3.5" /> {seller.location_address || seller.location}\n                  </p>\n                </div>\n              </div>\n              <p className="text-sm text-blue-600">{seller.fish_stocks_count} items available</p>\n            </Link>\n          ))}\n        </div>\n      ) : (\n        <p className="text-gray-400 text-center py-10">No sellers registered yet.</p>\n      )}\n    </div>\n  )\n}\n\n// ── MY ORDERS — existing implementation, unchanged logic ────────────\nfunction OrdersPanel() {\n  const { data, isLoading } = useQuery({\n    queryKey: [\'my-orders\'],\n    queryFn: () => getOrders().then((r) => r.data),\n  })\n\n  return (\n    <div>\n      <h1 className="text-2xl font-bold text-blue-900 mb-6">My Orders</h1>\n\n      {isLoading ? (\n        <p className="text-gray-400">Loading orders…</p>\n      ) : data?.data?.length ? (\n        <div className="space-y-4">\n          {data.data.map((order) => (\n            <div key={order.id} className="bg-white rounded-xl shadow p-5">\n              <div className="flex justify-between items-start flex-wrap gap-2">\n                <div>\n                  <p className="font-semibold">Order #{order.id} — {order.seller?.name}</p>\n                  <p className="text-gray-500 text-sm">\n                    {order.items?.length} item(s) · {formatTsh(order.total_amount)}\n                  </p>\n                </div>\n                <span className={`text-xs px-3 py-1 rounded-full font-medium ${STATUS_STYLE[order.status]}`}>\n                  {order.status.toUpperCase()}\n                </span>\n              </div>\n              {order.bill && (\n                <p className="text-sm text-blue-600 mt-2 flex items-center gap-1">\n                  <Receipt className="w-4 h-4" /> Bill #{order.bill.bill_number}\n                </p>\n              )}\n            </div>\n          ))}\n        </div>\n      ) : (\n        <p className="text-gray-400 text-center py-10">No orders yet — browse the marketplace to get started.</p>\n      )}\n    </div>\n  )\n}\n',
+}
 
 def main():
-    if not os.path.isdir(BACKEND):
-        print(f"❌  backend/ folder not found at {BACKEND}")
-        print("    Run this script from your project ROOT (e.g. ~/FishMarket).")
-        return
-
     for rel_path, content in FILES.items():
-        full_path = os.path.join(BACKEND, rel_path)
+        full_path = os.path.join(ROOT, rel_path)
         os.makedirs(os.path.dirname(full_path), exist_ok=True)
         with open(full_path, "w", encoding="utf-8") as f:
             f.write(content)
-        print(f"📄  backend/{rel_path}")
+        print(f"  {rel_path}")
 
     print()
-    print("✅  Backend dashboard endpoints added.")
+    print("Minor fixes patch applied.")
     print("""
-NEW ENDPOINTS
-─────────────
-  PUT    /api/password                    — any user changes own password
-  POST   /api/admin/users                 — admin registers a new admin
-  DELETE /api/admin/users/{id}            — admin permanently deletes a user
-  GET    /api/admin/metrics               — app-level performance metrics
-  GET    /api/seller/buyers               — seller's live buyer list
-
-⚠️  BOOTSTRAP YOUR FIRST ADMIN (one-time, after this deploys to Render):
-    This MUST be run once via Render's Shell tab (or locally against
-    Aiven if you have a tunnel) — it cannot be done through the API
-    since no admin exists yet to authorize the API-based creation route.
-
-    php artisan admin:create-first youremail@example.com YourSecurePass123
-
-    This command refuses to run a second time once any admin exists.
+MANUAL STEP REQUIRED
+---------------------
+  cd frontend && npm install lucide-react
 
 NEXT STEPS
-──────────
-  1. Commit on develop:
-       git add backend/app/Http/Controllers/API/PasswordController.php
-       git add backend/app/Http/Controllers/API/AdminController.php
-       git add backend/app/Http/Controllers/API/SellerController.php
-       git add backend/app/Console/Commands/CreateFirstAdmin.php
-       git add backend/routes/api.php
-       git add backend/tests/Feature/PasswordTest.php
-       git add backend/tests/Feature/AdminUserManagementTest.php
-       git add backend/tests/Feature/SellerBuyersTest.php
-       git add backend/database/factories/OrderFactory.php
-       git commit -m "Add password change, admin management, metrics, seller-buyers endpoints"
+----------
+  1. npm install lucide-react   (see above - REQUIRED before building)
+  2. cd frontend && npm run build
+  3. Commit on develop:
+       git add backend/app frontend/src backend/bootstrap backend/config
+       git add backend/database/migrations backend/tests
+       git commit -m "Minor fixes: TZ removal, auto-capitalize, password strength,
+       remove subscription step, Tsh currency, env-aware image storage, CSRF fix"
        git push origin develop
-
-  2. Watch GitHub Actions — should run AuthTest + SubscriptionTest +
-     PasswordTest + AdminUserManagementTest + SellerBuyersTest, all green.
-
-  3. Once deployed to Render, bootstrap your first admin (command above).
-
-  4. Frontend patch (sidebar dashboards) comes next, in a follow-up.
+  4. Watch GitHub Actions go green, then test locally:
+       - Register a seller with lowercase name -> should auto-capitalize
+       - Try a weak password -> should show red X's in strength indicator
+       - Complete seller signup -> should go straight to dashboard,
+         no plan-picker step
+       - Check prices show as "Tsh 15,000.00" not "TZS 15,000"
 """)
-
 
 if __name__ == "__main__":
     main()

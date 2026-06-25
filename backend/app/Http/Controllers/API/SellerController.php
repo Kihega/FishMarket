@@ -2,13 +2,15 @@
 
 namespace App\Http\Controllers\API;
 
+use App\Http\Controllers\API\Concerns\StoresImages;
 use App\Http\Controllers\Controller;
 use App\Models\User;
-use App\Models\Order;
 use Illuminate\Http\Request;
 
 class SellerController extends Controller
 {
+    use StoresImages;
+
     // Public: marketplace list of active sellers
     public function index(Request $request)
     {
@@ -48,7 +50,7 @@ class SellerController extends Controller
         ]);
 
         if ($request->hasFile('brand_logo')) {
-            $data['brand_logo'] = $request->file('brand_logo')->store('logos', 'public');
+            $data['brand_logo'] = $this->storeImage($request->file('brand_logo'), 'logos');
         }
 
         $user->update($data);
@@ -66,7 +68,7 @@ class SellerController extends Controller
         $seller = $request->user();
         abort_unless($seller->role === 'seller', 403);
 
-        $orders = Order::with(['buyer', 'delivery'])
+        $orders = \App\Models\Order::with(['buyer', 'delivery'])
             ->where('seller_id', $seller->id)
             ->latest()
             ->get();

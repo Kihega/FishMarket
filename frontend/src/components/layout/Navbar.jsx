@@ -1,4 +1,5 @@
 import { Link, useNavigate } from 'react-router-dom'
+import { Fish } from 'lucide-react'
 import { useAuthStore } from '../../store/authStore'
 import { useUIStore } from '../../store/uiStore'
 import { logout } from '../../api/auth'
@@ -16,7 +17,9 @@ export default function Navbar() {
 
   return (
     <header className="flex justify-between items-center px-8 py-4 bg-blue-700 text-white sticky top-0 z-40 shadow">
-      <Link to="/" className="text-xl font-bold">🐟 FishMarket TZ</Link>
+      <Link to="/" className="text-xl font-bold flex items-center gap-2">
+        <Fish className="w-6 h-6" /> SmartFish
+      </Link>
 
       <nav className="flex items-center gap-6">
         <Link to="/" className="hover:text-blue-200 font-medium">Home</Link>

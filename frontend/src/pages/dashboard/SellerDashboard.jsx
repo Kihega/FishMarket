@@ -5,6 +5,7 @@ import client from '../../api/client'
 import { getOrders, confirmOrder } from '../../api/orders'
 import { getStocks, deleteStock } from '../../api/stocks'
 import { useAuthStore } from '../../store/authStore'
+import { formatTsh } from '../../utils/currency'
 import DashboardLayout from '../../components/dashboard/DashboardLayout'
 import ChangePasswordModal from '../../components/dashboard/ChangePasswordModal'
 import ModalShell from '../../components/auth/ModalShell'
@@ -116,7 +117,7 @@ function HomePanel() {
             {logoPreview ? (
               <img src={logoPreview} alt="Preview" className="w-full h-full object-cover" />
             ) : user?.brand_logo ? (
-              <img src={`/storage/${user.brand_logo}`} alt="Current logo" className="w-full h-full object-cover" />
+              <img src={user.brand_logo.startsWith('data:') ? user.brand_logo : `/storage/${user.brand_logo}`} alt="Current logo" className="w-full h-full object-cover" />
             ) : (
               <span className="text-gray-400 text-xs text-center px-1">No logo</span>
             )}
@@ -178,7 +179,7 @@ function OrdersPanel() {
               <div>
                 <p className="font-semibold">Order #{order.id} — {order.buyer?.name}</p>
                 <p className="text-gray-500 text-sm">
-                  TZS {Number(order.total_amount).toLocaleString()} · {order.payment_status}
+                  {formatTsh(order.total_amount)} · {order.payment_status}
                 </p>
                 <p className="text-sm capitalize">Status: {order.status}</p>
               </div>
@@ -238,7 +239,7 @@ function StocksPanel() {
             <div key={s.id} className="bg-white rounded-xl shadow p-4 flex flex-col">
               {s.image && (
                 <img
-                  src={`/storage/${s.image}`}
+                  src={s.image.startsWith('data:') ? s.image : `/storage/${s.image}`}
                   alt={s.fish_name}
                   className="w-full h-32 object-cover rounded-lg mb-3"
                 />
@@ -248,7 +249,7 @@ function StocksPanel() {
               </span>
               <p className="font-semibold">{s.fish_name}</p>
               <p className="text-gray-500 text-sm">
-                {s.quantity_kg} kg · TZS {Number(s.price_per_kg).toLocaleString()}/kg
+                {s.quantity_kg} kg · {formatTsh(s.price_per_kg)}/kg
               </p>
               <span
                 className={`text-xs mt-1 ${

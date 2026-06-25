@@ -12,7 +12,13 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware) {
-        $middleware->statefulApi();
+        // statefulApi() removed: it enables session/CSRF-cookie based auth
+        // for "stateful" frontend domains, which is for SPA-same-origin
+        // session auth. Our app authenticates exclusively via Sanctum
+        // Bearer tokens (Authorization header) — see frontend/src/api/client.js
+        // — so statefulApi() was solving a problem we don't have, and was
+        // the source of intermittent CSRF token mismatch errors during
+        // local testing (no SESSION_DOMAIN matched localhost).
 
         $middleware->alias([
             'admin' => \App\Http\Middleware\EnsureUserIsAdmin::class,

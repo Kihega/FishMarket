@@ -1,3 +1,4 @@
+import { Fish, ShoppingCart } from 'lucide-react'
 import ModalShell from './ModalShell'
 import { useUIStore } from '../../store/uiStore'
 
@@ -7,7 +8,7 @@ export default function SignupChoiceModal() {
   return (
     <ModalShell onClose={closeModal}>
       <div className="text-center mb-6">
-        <h2 className="text-2xl font-bold text-blue-900">Join FishMarket TZ</h2>
+        <h2 className="text-2xl font-bold text-blue-900">Join SmartFish</h2>
         <p className="text-gray-500 mt-1">Choose how you want to use the platform</p>
       </div>
 
@@ -17,7 +18,7 @@ export default function SignupChoiceModal() {
           className="border-2 border-blue-600 rounded-xl p-5 text-left hover:bg-blue-50 transition group"
         >
           <div className="flex items-center gap-3">
-            <span className="text-3xl">🐟</span>
+            <Fish className="w-8 h-8 text-blue-600 flex-shrink-0" />
             <div>
               <h3 className="font-bold text-blue-900 group-hover:text-blue-700">
                 Create Seller Account
@@ -34,7 +35,7 @@ export default function SignupChoiceModal() {
           className="border-2 border-blue-600 rounded-xl p-5 text-left hover:bg-blue-50 transition group"
         >
           <div className="flex items-center gap-3">
-            <span className="text-3xl">🛒</span>
+            <ShoppingCart className="w-8 h-8 text-blue-600 flex-shrink-0" />
             <div>
               <h3 className="font-bold text-blue-900 group-hover:text-blue-700">
                 Create Buyer Account

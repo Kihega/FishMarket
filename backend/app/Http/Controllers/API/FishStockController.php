@@ -2,12 +2,15 @@
 
 namespace App\Http\Controllers\API;
 
+use App\Http\Controllers\API\Concerns\StoresImages;
 use App\Http\Controllers\Controller;
 use App\Models\FishStock;
 use Illuminate\Http\Request;
 
 class FishStockController extends Controller
 {
+    use StoresImages;
+
     // Public: list stocks (optionally filtered by seller or category)
     public function index(Request $request)
     {
@@ -33,7 +36,7 @@ class FishStockController extends Controller
         ]);
 
         if ($request->hasFile('image')) {
-            $data['image'] = $request->file('image')->store('stocks', 'public');
+            $data['image'] = $this->storeImage($request->file('image'), 'stocks');
         }
 
         $stock = $request->user()->fishStocks()->create($data);

@@ -1,5 +1,7 @@
 import { useState } from 'react'
+import { Smartphone, Landmark } from 'lucide-react'
 import { placeOrder, payOrder } from '../../api/orders'
+import { formatTsh } from '../../utils/currency'
 import toast from 'react-hot-toast'
 
 export default function OrderModal({ data: { stock, seller, agencies }, onClose }) {
@@ -48,16 +50,18 @@ export default function OrderModal({ data: { stock, seller, agencies }, onClose 
 
         <label className="block text-sm mb-1">Payment Method</label>
         <div className="flex gap-4 mb-6">
-          {['mobile', 'bank'].map(m => (
-            <label key={m} className="flex items-center gap-2 cursor-pointer">
-              <input type="radio" value={m} checked={method===m} onChange={() => setMethod(m)} />
-              {m === 'mobile' ? '📱 Mobile Money' : '🏦 Bank Transfer'}
-            </label>
-          ))}
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input type="radio" value="mobile" checked={method === 'mobile'} onChange={() => setMethod('mobile')} />
+            <Smartphone className="w-4 h-4" /> Mobile Money
+          </label>
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input type="radio" value="bank" checked={method === 'bank'} onChange={() => setMethod('bank')} />
+            <Landmark className="w-4 h-4" /> Bank Transfer
+          </label>
         </div>
 
         <div className="bg-blue-50 rounded-lg p-3 mb-4">
-          <p className="font-semibold text-blue-900">Total: TZS {Number(total).toLocaleString()}</p>
+          <p className="font-semibold text-blue-900">Total: {formatTsh(total)}</p>
         </div>
 
         <div className="flex gap-3">
