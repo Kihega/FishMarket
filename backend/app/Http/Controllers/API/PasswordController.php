@@ -18,7 +18,12 @@ class PasswordController extends Controller
 
         $data = $request->validate([
             'current_password' => 'required|string',
-            'password' => 'required|string|min:8|confirmed',
+            'password' => [
+                'required', 'string', 'min:8', 'confirmed',
+                'regex:/^(?=.*[a-zA-Z])(?=.*\d)(?=.*[^a-zA-Z\d]).+$/',
+            ],
+        ], [
+            'password.regex' => 'Password must contain letters, numbers, and at least one special character.',
         ]);
 
         if (! Hash::check($data['current_password'], $user->password)) {

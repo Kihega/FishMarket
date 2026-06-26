@@ -28,7 +28,7 @@ class FishStockController extends Controller
         abort_unless($request->user()->role === 'seller', 403, 'Sellers only');
 
         $data = $request->validate([
-            'category_id' => 'required|exists:fish_categories,id',
+            'category_id' => 'nullable|exists:fish_categories,id',
             'fish_name' => 'required|string',
             'quantity_kg' => 'required|numeric|min:0.1',
             'price_per_kg' => 'required|numeric|min:0',

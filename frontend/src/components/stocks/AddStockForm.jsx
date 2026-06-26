@@ -1,21 +1,15 @@
 import { useState } from 'react'
-import { useMutation, useQueryClient, useQuery } from '@tanstack/react-query'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { createStock } from '../../api/stocks'
-import client from '../../api/client'
 import toast from 'react-hot-toast'
 
 export default function AddStockForm({ onDone }) {
   const qc = useQueryClient()
   const [form, setForm] = useState({
-    fish_name: '', category_id: '', quantity_kg: '', price_per_kg: '',
+    fish_name: '', quantity_kg: '', price_per_kg: '',
   })
   const [image, setImage] = useState(null)
   const [imagePreview, setImagePreview] = useState(null)
-
-  const { data: cats } = useQuery({
-    queryKey: ['categories'],
-    queryFn: () => client.get('/categories').then((r) => r.data),
-  })
 
   const handleImageChange = (e) => {
     const file = e.target.files[0]
@@ -33,7 +27,7 @@ export default function AddStockForm({ onDone }) {
     onSuccess: () => {
       toast.success('Stock added!')
       qc.invalidateQueries(['seller-stocks'])
-      setForm({ fish_name: '', category_id: '', quantity_kg: '', price_per_kg: '' })
+      setForm({ fish_name: '', quantity_kg: '', price_per_kg: '' })
       setImage(null)
       setImagePreview(null)
       onDone?.()
@@ -46,18 +40,8 @@ export default function AddStockForm({ onDone }) {
       <h2 className="font-bold text-blue-900 mb-4">Add Fish Stock</h2>
 
       <div className="grid grid-cols-2 gap-3">
-        <select
-          className="input col-span-2"
-          value={form.category_id}
-          onChange={(e) => setForm({ ...form, category_id: e.target.value })}
-        >
-          <option value="">Select category…</option>
-          {cats?.map((c) => (
-            <option key={c.id} value={c.id}>{c.name}</option>
-          ))}
-        </select>
         <input
-          className="input" placeholder="Fish name"
+          className="input col-span-2" placeholder="Fish name"
           value={form.fish_name}
           onChange={(e) => setForm({ ...form, fish_name: e.target.value })}
         />
@@ -93,7 +77,7 @@ export default function AddStockForm({ onDone }) {
 
       <button
         onClick={() => add.mutate()}
-        disabled={add.isPending || !form.fish_name || !form.category_id}
+        disabled={add.isPending || !form.fish_name}
         className="mt-4 btn-primary w-full"
       >
         {add.isPending ? 'Adding…' : 'Add Stock'}

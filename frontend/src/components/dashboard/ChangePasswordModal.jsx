@@ -2,6 +2,7 @@ import { useState } from 'react'
 import toast from 'react-hot-toast'
 import client from '../../api/client'
 import ModalShell from '../auth/ModalShell'
+import PasswordStrengthIndicator, { isPasswordStrong } from '../auth/PasswordStrengthIndicator'
 
 export default function ChangePasswordModal({ onClose }) {
   const [form, setForm] = useState({
@@ -18,6 +19,10 @@ export default function ChangePasswordModal({ onClose }) {
 
     if (form.password !== form.password_confirmation) {
       setError('New passwords do not match')
+      return
+    }
+    if (!isPasswordStrong(form.password)) {
+      setError('Password must contain letters, numbers, and a special character')
       return
     }
 
@@ -60,6 +65,7 @@ export default function ChangePasswordModal({ onClose }) {
           value={form.password}
           onChange={(e) => setForm({ ...form, password: e.target.value })}
         />
+        <PasswordStrengthIndicator password={form.password} />
         <input
           type="password"
           required

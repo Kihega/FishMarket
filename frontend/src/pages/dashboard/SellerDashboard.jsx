@@ -59,12 +59,8 @@ export default function SellerDashboard() {
   )
 }
 
-// ── HOME — quick overview + profile/brand logo setup ───────────────
+// ── HOME — quick overview ───────────────────────────────────────────
 function HomePanel() {
-  const { user, setAuth } = useAuthStore()
-  const [logoFile, setLogoFile] = useState(null)
-  const [logoPreview, setLogoPreview] = useState(null)
-
   const { data: orders } = useQuery({
     queryKey: ['seller-orders'],
     queryFn: () => getOrders().then((r) => r.data),
@@ -77,29 +73,6 @@ function HomePanel() {
   const pendingCount = orders?.data?.filter((o) => o.status === 'pending' || o.status === 'received').length ?? 0
   const stockCount = stocks?.data?.length ?? 0
 
-  const handleLogoChange = (e) => {
-    const file = e.target.files[0]
-    setLogoFile(file)
-    setLogoPreview(file ? URL.createObjectURL(file) : null)
-  }
-
-  const uploadLogo = useMutation({
-    mutationFn: () => {
-      const fd = new FormData()
-      fd.append('brand_logo', logoFile)
-      return client.put('/seller/profile', fd, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      })
-    },
-    onSuccess: (res) => {
-      toast.success('Brand logo updated')
-      setAuth(res.data, useAuthStore.getState().token)
-      setLogoFile(null)
-      setLogoPreview(null)
-    },
-    onError: () => toast.error('Failed to upload logo'),
-  })
-
   return (
     <div>
       <h1 className="text-2xl font-bold text-blue-900 mb-6">Welcome back</h1>
@@ -108,33 +81,6 @@ function HomePanel() {
         <StatCard label="Pending Orders" value={pendingCount} />
         <StatCard label="Active Stock Items" value={stockCount} />
         <StatCard label="Total Orders" value={orders?.data?.length ?? 0} />
-      </div>
-
-      <div className="bg-white rounded-xl shadow p-5 max-w-md">
-        <h2 className="font-bold text-blue-900 mb-3">Business Brand Logo</h2>
-        <div className="flex items-center gap-4">
-          <div className="w-20 h-20 rounded-full border-2 border-dashed border-gray-300 flex items-center justify-center overflow-hidden bg-gray-50 flex-shrink-0">
-            {logoPreview ? (
-              <img src={logoPreview} alt="Preview" className="w-full h-full object-cover" />
-            ) : user?.brand_logo ? (
-              <img src={user.brand_logo.startsWith('data:') ? user.brand_logo : `/storage/${user.brand_logo}`} alt="Current logo" className="w-full h-full object-cover" />
-            ) : (
-              <span className="text-gray-400 text-xs text-center px-1">No logo</span>
-            )}
-          </div>
-          <div className="flex-1">
-            <input type="file" accept="image/*" onChange={handleLogoChange} className="input text-sm" />
-            {logoFile && (
-              <button
-                onClick={() => uploadLogo.mutate()}
-                disabled={uploadLogo.isPending}
-                className="btn-primary mt-2 text-sm py-1.5 w-full"
-              >
-                {uploadLogo.isPending ? 'Uploading…' : 'Save Logo'}
-              </button>
-            )}
-          </div>
-        </div>
       </div>
     </div>
   )
