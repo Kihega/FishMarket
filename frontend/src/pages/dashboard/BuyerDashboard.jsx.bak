@@ -4,7 +4,6 @@ import { Link } from 'react-router-dom'
 import { Fish, MapPin, Receipt } from 'lucide-react'
 import { getOrders } from '../../api/orders'
 import { getSellers } from '../../api/sellers'
-import { resolveImage } from '../../api/client'
 import { useAuthStore } from '../../store/authStore'
 import { formatTsh } from '../../utils/currency'
 import DashboardLayout from '../../components/dashboard/DashboardLayout'
@@ -12,15 +11,15 @@ import ChangePasswordModal from '../../components/dashboard/ChangePasswordModal'
 import { HomeIcon, ClipboardListIcon, LockIcon, LogoutIcon } from '../../components/dashboard/Icons'
 
 const SECTIONS = [
-  { key: 'home',     label: 'Home',            icon: HomeIcon },
-  { key: 'orders',   label: 'My Orders',       icon: ClipboardListIcon },
+  { key: 'home', label: 'Home', icon: HomeIcon },
+  { key: 'orders', label: 'My Orders', icon: ClipboardListIcon },
   { key: 'password', label: 'Change Password', icon: LockIcon },
-  { key: 'logout',   label: 'Logout',          icon: LogoutIcon },
+  { key: 'logout', label: 'Logout', icon: LogoutIcon },
 ]
 
 const STATUS_STYLE = {
-  pending:   'bg-yellow-100 text-yellow-700',
-  received:  'bg-blue-100 text-blue-700',
+  pending: 'bg-yellow-100 text-yellow-700',
+  received: 'bg-blue-100 text-blue-700',
   confirmed: 'bg-green-100 text-green-700',
   processed: 'bg-gray-100 text-gray-700',
   cancelled: 'bg-red-100 text-red-600',
@@ -32,36 +31,44 @@ export default function BuyerDashboard() {
   const { clearAuth } = useAuthStore()
 
   const handleSelect = (key) => {
-    if (key === 'logout') { clearAuth(); window.location.href = '/'; return }
-    if (key === 'password') { setShowPasswordModal(true); return }
+    if (key === 'logout') {
+      clearAuth()
+      window.location.href = '/'
+      return
+    }
+    if (key === 'password') {
+      setShowPasswordModal(true)
+      return
+    }
     setActive(key)
   }
 
   return (
     <>
       <DashboardLayout items={SECTIONS} activeKey={active} onSelect={handleSelect}>
-        {active === 'home'   && <HomePanel />}
+        {active === 'home' && <HomePanel />}
         {active === 'orders' && <OrdersPanel />}
       </DashboardLayout>
-      {showPasswordModal && <ChangePasswordModal onClose={() => setShowPasswordModal(false)} />}
+
+      {showPasswordModal && (
+        <ChangePasswordModal onClose={() => setShowPasswordModal(false)} />
+      )}
     </>
   )
 }
 
-// ── HOME — browse seller platforms, refreshes every 15 s ─────────────
+// ── HOME — browse registered seller platforms ───────────────────────
 function HomePanel() {
   const { data, isLoading } = useQuery({
     queryKey: ['buyer-home-sellers'],
     queryFn: () => getSellers({}).then((r) => r.data),
-    refetchInterval: 15000,          // live: new sellers appear within 15 s
-    staleTime: 0,
   })
 
   return (
     <div>
       <h1 className="text-2xl font-bold text-blue-900 mb-2">Browse Markets</h1>
       <p className="text-gray-500 text-sm mb-6">
-        Registered seller businesses on SmartFish · updates every 15 s
+        Registered seller businesses on SmartFish
       </p>
 
       {isLoading ? (
@@ -79,9 +86,9 @@ function HomePanel() {
               className="bg-white rounded-2xl shadow p-5 hover:shadow-md transition flex flex-col gap-3"
             >
               <div className="flex items-center gap-3">
-                {resolveImage(seller.brand_logo) ? (
+                {seller.brand_logo ? (
                   <img
-                    src={resolveImage(seller.brand_logo)}
+                    src={seller.brand_logo.startsWith('data:') ? seller.brand_logo : `/storage/${seller.brand_logo}`}
                     alt={seller.name}
                     className="w-14 h-14 rounded-full object-cover border"
                   />
@@ -108,19 +115,16 @@ function HomePanel() {
   )
 }
 
-// ── MY ORDERS — polls every 15 s ─────────────────────────────────────
+// ── MY ORDERS — existing implementation, unchanged logic ────────────
 function OrdersPanel() {
   const { data, isLoading } = useQuery({
     queryKey: ['my-orders'],
     queryFn: () => getOrders().then((r) => r.data),
-    refetchInterval: 15000,
-    staleTime: 0,
   })
 
   return (
     <div>
-      <h1 className="text-2xl font-bold text-blue-900 mb-2">My Orders</h1>
-      <p className="text-gray-500 text-sm mb-6">Live order updates · refreshes every 15 s</p>
+      <h1 className="text-2xl font-bold text-blue-900 mb-6">My Orders</h1>
 
       {isLoading ? (
         <p className="text-gray-400">Loading orders…</p>
@@ -135,8 +139,8 @@ function OrdersPanel() {
                     {order.items?.length} item(s) · {formatTsh(order.total_amount)}
                   </p>
                 </div>
-                <span className={`text-xs px-3 py-1 rounded-full font-medium ${STATUS_STYLE[order.status] ?? ''}`}>
-                  {order.status?.toUpperCase()}
+                <span className={`text-xs px-3 py-1 rounded-full font-medium ${STATUS_STYLE[order.status]}`}>
+                  {order.status.toUpperCase()}
                 </span>
               </div>
               {order.bill && (
@@ -148,9 +152,7 @@ function OrdersPanel() {
           ))}
         </div>
       ) : (
-        <p className="text-gray-400 text-center py-10">
-          No orders yet — browse the marketplace to get started.
-        </p>
+        <p className="text-gray-400 text-center py-10">No orders yet — browse the marketplace to get started.</p>
       )}
     </div>
   )

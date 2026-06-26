@@ -1,4 +1,3 @@
-import { resolveImage } from '../../api/client'
 import { Link } from 'react-router-dom'
 import { Fish, MapPin } from 'lucide-react'
 
@@ -8,7 +7,7 @@ export default function SellerCard({ seller }) {
       <div className="flex items-center gap-3">
         {seller.brand_logo
           ? <img
-              src={resolveImage(seller.brand_logo)}
+              src={seller.brand_logo.startsWith('data:') ? seller.brand_logo : `/storage/${seller.brand_logo}`}
               alt={seller.name}
               className="w-14 h-14 rounded-full object-cover border"
             />

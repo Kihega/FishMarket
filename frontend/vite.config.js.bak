@@ -7,15 +7,10 @@ export default defineConfig({
   plugins: [react(), tailwindcss()],
   server: {
     port: 5173,
-    // Dev proxy: only used when VITE_API_BASE_URL is set to /api
-    // (relative URL). When it is a full http:// URL the proxy is
-    // bypassed — requests go directly to that origin.
+    // Not used while VITE_API_BASE_URL points at Render, but kept
+    // here in case a local backend is ever spun up for debugging.
     proxy: {
       '/api': {
-        target: 'http://localhost:8000',
-        changeOrigin: true,
-      },
-      '/storage': {
         target: 'http://localhost:8000',
         changeOrigin: true,
       },

@@ -3,49 +3,48 @@
 namespace App\Http\Controllers\API\Concerns;
 
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Storage;
 
 /**
- * Decides HOW to store an uploaded image based on the current database
- * connection:
- *   - Local MySQL (127.0.0.1 / localhost)  → base64-encode and store
- *     directly in the database column (no disk dependency, works
- *     immediately on a fresh laptop setup for presentations/demos).
- *   - Remote database (e.g. Aiven on Render) → store on local disk via
- *     Laravel's filesystem, since Render's disk is ephemeral per
- *     deploy but fine for the lifetime of a single running container.
+ * Decides HOW to store an uploaded image:
  *
- * Both modes are written to the SAME database column (a string),
- * so no schema change is needed: it either holds a disk path like
- * "stocks/abc123.jpg" or a full data URI like "data:image/jpeg;base64,...".
- * The frontend already does the right thing for disk paths
- * (`/storage/${path}`) — see StoredImage below for the base64 case.
+ * - Local DB (127.0.0.1 / localhost):
+ *     Base64-encode and store inline in the DB column.
+ *     No disk or symlink setup required — works immediately on
+ *     any fresh clone.
+ *
+ * - Remote DB (Aiven / production):
+ *     Store on Laravel's public disk; return a full URL
+ *     (APP_URL/storage/path) so the frontend never has to
+ *     guess the backend origin.
+ *
+ * The DB column always holds either:
+ *   "data:image/jpeg;base64,…"   ← local
+ *   "https://host/storage/…"     ← remote
+ *
+ * The frontend checks `startsWith('data:')` or `startsWith('http')`
+ * and uses the value as-is in both cases.
  */
 trait StoresImages
 {
     protected function isLocalDatabase(): bool
     {
+        // When DATABASE_URL is set (production), the host env var
+        // is the Aiven hostname — never 127.0.0.1/localhost.
         $host = config('database.connections.mysql.host', '');
-
-        // When DATABASE_URL is used (Aiven/production), the parsed host
-        // will be the Aiven hostname, never 127.0.0.1/localhost.
         return in_array($host, ['127.0.0.1', 'localhost'], true);
     }
 
-    /**
-     * Stores the file and returns the value to save in the DB column.
-     * - Local DB: returns a base64 data URI (e.g. "data:image/png;base64,...")
-     * - Remote DB: returns a disk path (e.g. "stocks/abc123.jpg"), same
-     *   as before this patch — no behavior change for Aiven/Render.
-     */
     protected function storeImage(UploadedFile $file, string $folder): string
     {
         if ($this->isLocalDatabase()) {
-            $mime = $file->getMimeType();
+            $mime     = $file->getMimeType();
             $contents = base64_encode(file_get_contents($file->getRealPath()));
-
             return "data:{$mime};base64,{$contents}";
         }
 
-        return $file->store($folder, 'public');
+        // Production: store on disk, return full URL
+        $path = $file->store($folder, 'public');
+        return Storage::disk('public')->url($path);
     }
 }
