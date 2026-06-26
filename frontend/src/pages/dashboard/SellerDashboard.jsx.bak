@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
-import client, { resolveImage } from '../../api/client'
+import client from '../../api/client'
 import { getOrders, confirmOrder } from '../../api/orders'
 import { getStocks, deleteStock } from '../../api/stocks'
 import { useAuthStore } from '../../store/authStore'
@@ -11,18 +11,17 @@ import ChangePasswordModal from '../../components/dashboard/ChangePasswordModal'
 import ModalShell from '../../components/auth/ModalShell'
 import AddStockForm from '../../components/stocks/AddStockForm'
 import {
-  HomeIcon, ClipboardListIcon, PackageIcon, ContactIcon,
-  TruckIcon, LockIcon, LogoutIcon,
+  HomeIcon, ClipboardListIcon, PackageIcon, ContactIcon, TruckIcon, LockIcon, LogoutIcon,
 } from '../../components/dashboard/Icons'
 
 const SECTIONS = [
-  { key: 'home',     label: 'Home',              icon: HomeIcon },
-  { key: 'orders',   label: 'Manage Orders',     icon: ClipboardListIcon },
-  { key: 'stocks',   label: 'Manage Stocks',     icon: PackageIcon },
-  { key: 'buyers',   label: 'Manage Buyers',     icon: ContactIcon },
+  { key: 'home', label: 'Home', icon: HomeIcon },
+  { key: 'orders', label: 'Manage Orders', icon: ClipboardListIcon },
+  { key: 'stocks', label: 'Manage Stocks', icon: PackageIcon },
+  { key: 'buyers', label: 'Manage Buyers', icon: ContactIcon },
   { key: 'agencies', label: 'Delivery Partners', icon: TruckIcon },
-  { key: 'password', label: 'Change Password',   icon: LockIcon },
-  { key: 'logout',   label: 'Logout',            icon: LogoutIcon },
+  { key: 'password', label: 'Change Password', icon: LockIcon },
+  { key: 'logout', label: 'Logout', icon: LogoutIcon },
 ]
 
 export default function SellerDashboard() {
@@ -31,51 +30,57 @@ export default function SellerDashboard() {
   const { clearAuth } = useAuthStore()
 
   const handleSelect = (key) => {
-    if (key === 'logout') { clearAuth(); window.location.href = '/'; return }
-    if (key === 'password') { setShowPasswordModal(true); return }
+    if (key === 'logout') {
+      clearAuth()
+      window.location.href = '/'
+      return
+    }
+    if (key === 'password') {
+      setShowPasswordModal(true)
+      return
+    }
     setActive(key)
   }
 
   return (
     <>
       <DashboardLayout items={SECTIONS} activeKey={active} onSelect={handleSelect}>
-        {active === 'home'     && <HomePanel />}
-        {active === 'orders'   && <OrdersPanel />}
-        {active === 'stocks'   && <StocksPanel />}
-        {active === 'buyers'   && <BuyersPanel />}
+        {active === 'home' && <HomePanel />}
+        {active === 'orders' && <OrdersPanel />}
+        {active === 'stocks' && <StocksPanel />}
+        {active === 'buyers' && <BuyersPanel />}
         {active === 'agencies' && <AgenciesPanel />}
       </DashboardLayout>
-      {showPasswordModal && <ChangePasswordModal onClose={() => setShowPasswordModal(false)} />}
+
+      {showPasswordModal && (
+        <ChangePasswordModal onClose={() => setShowPasswordModal(false)} />
+      )}
     </>
   )
 }
 
-// ── HOME — quick stats overview (polls every 30 s) ────────────────────
+// ── HOME — quick overview ───────────────────────────────────────────
 function HomePanel() {
   const { data: orders } = useQuery({
     queryKey: ['seller-orders'],
     queryFn: () => getOrders().then((r) => r.data),
-    refetchInterval: 30000,
-    staleTime: 0,
   })
   const { data: stocks } = useQuery({
     queryKey: ['seller-stocks'],
     queryFn: () => getStocks({}).then((r) => r.data),
-    refetchInterval: 30000,
-    staleTime: 0,
   })
 
-  const pendingCount = orders?.data?.filter(
-    (o) => o.status === 'pending' || o.status === 'received'
-  ).length ?? 0
+  const pendingCount = orders?.data?.filter((o) => o.status === 'pending' || o.status === 'received').length ?? 0
+  const stockCount = stocks?.data?.length ?? 0
 
   return (
     <div>
       <h1 className="text-2xl font-bold text-blue-900 mb-6">Welcome back</h1>
+
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-        <StatCard label="Pending Orders"    value={pendingCount} />
-        <StatCard label="Active Stock Items" value={stocks?.data?.length ?? 0} />
-        <StatCard label="Total Orders"       value={orders?.data?.length ?? 0} />
+        <StatCard label="Pending Orders" value={pendingCount} />
+        <StatCard label="Active Stock Items" value={stockCount} />
+        <StatCard label="Total Orders" value={orders?.data?.length ?? 0} />
       </div>
     </div>
   )
@@ -90,37 +95,33 @@ function StatCard({ label, value }) {
   )
 }
 
-// ── MANAGE ORDERS — polls every 10 s ─────────────────────────────────
+// ── MANAGE ORDERS — live, polling every 15s ─────────────────────────
 function OrdersPanel() {
   const qc = useQueryClient()
 
   const { data: orders } = useQuery({
     queryKey: ['seller-orders'],
     queryFn: () => getOrders().then((r) => r.data),
-    refetchInterval: 10000,      // new orders appear within 10 s
-    staleTime: 0,
+    refetchInterval: 15000,
   })
 
   const confirm = useMutation({
     mutationFn: (id) => confirmOrder(id),
     onSuccess: () => {
       toast.success('Order confirmed!')
-      qc.invalidateQueries({ queryKey: ['seller-orders'] })
+      qc.invalidateQueries(['seller-orders'])
     },
   })
 
   return (
     <div>
       <h1 className="text-2xl font-bold text-blue-900 mb-2">Manage Orders</h1>
-      <p className="text-gray-500 text-sm mb-6">Live order updates · refreshes every 10 s</p>
+      <p className="text-gray-500 text-sm mb-6">Live order updates · refreshes every 15 seconds</p>
 
       <div className="space-y-4">
         {orders?.data?.length ? (
           orders.data.map((order) => (
-            <div
-              key={order.id}
-              className="bg-white rounded-xl shadow p-4 flex justify-between items-center flex-wrap gap-3"
-            >
+            <div key={order.id} className="bg-white rounded-xl shadow p-4 flex justify-between items-center flex-wrap gap-3">
               <div>
                 <p className="font-semibold">Order #{order.id} — {order.buyer?.name}</p>
                 <p className="text-gray-500 text-sm">
@@ -146,7 +147,7 @@ function OrdersPanel() {
   )
 }
 
-// ── MANAGE STOCKS — polls every 15 s ─────────────────────────────────
+// ── MANAGE STOCKS — dynamic responsive card grid ────────────────────
 function StocksPanel() {
   const qc = useQueryClient()
   const [showAddForm, setShowAddForm] = useState(false)
@@ -154,37 +155,37 @@ function StocksPanel() {
   const { data: stocks } = useQuery({
     queryKey: ['seller-stocks'],
     queryFn: () => getStocks({}).then((r) => r.data),
-    refetchInterval: 15000,
-    staleTime: 0,
   })
 
   const remove = useMutation({
     mutationFn: (id) => deleteStock(id),
     onSuccess: () => {
       toast.success('Stock removed')
-      qc.invalidateQueries({ queryKey: ['seller-stocks'] })
+      qc.invalidateQueries(['seller-stocks'])
     },
   })
 
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-2xl font-bold text-blue-900">Manage Stocks</h1>
-          <p className="text-gray-500 text-sm">Live updates · refreshes every 15 s</p>
-        </div>
+        <h1 className="text-2xl font-bold text-blue-900">Manage Stocks</h1>
         <button onClick={() => setShowAddForm(true)} className="btn-primary">
           + Add New Stock
         </button>
       </div>
 
+      {/*
+        Dynamic responsive grid: card count per row adapts to screen
+        size automatically via Tailwind's grid-cols breakpoints —
+        1 col on mobile, 2 on tablet, 3 on desktop, 4 on wide screens.
+      */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
         {stocks?.data?.length ? (
           stocks.data.map((s) => (
             <div key={s.id} className="bg-white rounded-xl shadow p-4 flex flex-col">
-              {resolveImage(s.image) && (
+              {s.image && (
                 <img
-                  src={resolveImage(s.image)}
+                  src={s.image.startsWith('data:') ? s.image : `/storage/${s.image}`}
                   alt={s.fish_name}
                   className="w-full h-32 object-cover rounded-lg mb-3"
                 />
@@ -196,7 +197,11 @@ function StocksPanel() {
               <p className="text-gray-500 text-sm">
                 {s.quantity_kg} kg · {formatTsh(s.price_per_kg)}/kg
               </p>
-              <span className={`text-xs mt-1 ${s.status === 'active' ? 'text-green-600' : 'text-red-500'}`}>
+              <span
+                className={`text-xs mt-1 ${
+                  s.status === 'active' ? 'text-green-600' : 'text-red-500'
+                }`}
+              >
                 {s.status === 'active' ? '● In Stock' : '● Out of Stock'}
               </span>
               <button
@@ -216,27 +221,26 @@ function StocksPanel() {
 
       {showAddForm && (
         <ModalShell onClose={() => setShowAddForm(false)} maxWidth="max-w-lg">
-          <AddStockForm onDone={() => { setShowAddForm(false); qc.invalidateQueries({ queryKey: ['seller-stocks'] }) }} />
+          <AddStockForm onDone={() => setShowAddForm(false)} />
         </ModalShell>
       )}
     </div>
   )
 }
 
-// ── MANAGE BUYERS — polls every 10 s ─────────────────────────────────
+// ── MANAGE BUYERS — live buyer activity on this seller's platform ───
 function BuyersPanel() {
   const { data: buyers } = useQuery({
     queryKey: ['seller-buyers'],
     queryFn: () => client.get('/seller/buyers').then((r) => r.data),
-    refetchInterval: 10000,
-    staleTime: 0,
+    refetchInterval: 15000,
   })
 
   return (
     <div>
       <h1 className="text-2xl font-bold text-blue-900 mb-2">Manage Buyers</h1>
       <p className="text-gray-500 text-sm mb-6">
-        Buyers who have placed orders on your platform · live updates every 10 s
+        Buyers who have placed orders on your platform · live updates
       </p>
 
       <div className="bg-white rounded-xl shadow divide-y">
@@ -268,7 +272,7 @@ function BuyersPanel() {
   )
 }
 
-// ── DELIVERY PARTNERS — polls every 15 s ─────────────────────────────
+// ── DELIVERY PARTNERS — manage agencies ──────────────────────────────
 function AgenciesPanel() {
   const qc = useQueryClient()
   const [form, setForm] = useState({ agency_name: '', contact: '', area_covered: '' })
@@ -276,15 +280,13 @@ function AgenciesPanel() {
   const { data: agencies } = useQuery({
     queryKey: ['seller-agencies'],
     queryFn: () => client.get('/agencies').then((r) => r.data),
-    refetchInterval: 15000,
-    staleTime: 0,
   })
 
   const addAgency = useMutation({
     mutationFn: (data) => client.post('/agencies', data),
     onSuccess: () => {
       toast.success('Delivery partner added')
-      qc.invalidateQueries({ queryKey: ['seller-agencies'] })
+      qc.invalidateQueries(['seller-agencies'])
       setForm({ agency_name: '', contact: '', area_covered: '' })
     },
   })
@@ -293,7 +295,7 @@ function AgenciesPanel() {
     mutationFn: (id) => client.delete(`/agencies/${id}`),
     onSuccess: () => {
       toast.success('Delivery partner removed')
-      qc.invalidateQueries({ queryKey: ['seller-agencies'] })
+      qc.invalidateQueries(['seller-agencies'])
     },
   })
 
