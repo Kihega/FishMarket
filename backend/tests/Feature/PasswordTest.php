@@ -17,12 +17,12 @@ class PasswordTest extends TestCase
 
         $response = $this->actingAs($user, 'sanctum')->putJson('/api/password', [
             'current_password' => 'oldpassword123',
-            'password' => 'newpassword456',
-            'password_confirmation' => 'newpassword456',
+            'password' => 'NewPassword456!',
+            'password_confirmation' => 'NewPassword456!',
         ]);
 
         $response->assertStatus(200);
-        $this->assertTrue(Hash::check('newpassword456', $user->fresh()->password));
+        $this->assertTrue(Hash::check('NewPassword456!', $user->fresh()->password));
     }
 
     public function test_password_change_fails_with_wrong_current_password(): void
@@ -31,8 +31,8 @@ class PasswordTest extends TestCase
 
         $response = $this->actingAs($user, 'sanctum')->putJson('/api/password', [
             'current_password' => 'wrongpassword',
-            'password' => 'newpassword456',
-            'password_confirmation' => 'newpassword456',
+            'password' => 'NewPassword456!',
+            'password_confirmation' => 'NewPassword456!',
         ]);
 
         $response->assertStatus(422);
@@ -44,8 +44,21 @@ class PasswordTest extends TestCase
 
         $response = $this->actingAs($user, 'sanctum')->putJson('/api/password', [
             'current_password' => 'oldpassword123',
-            'password' => 'newpassword456',
+            'password' => 'NewPassword456!',
             'password_confirmation' => 'doesnotmatch',
+        ]);
+
+        $response->assertStatus(422);
+    }
+
+    public function test_password_change_rejects_weak_password_without_special_character(): void
+    {
+        $user = User::factory()->create(['password' => bcrypt('oldpassword123')]);
+
+        $response = $this->actingAs($user, 'sanctum')->putJson('/api/password', [
+            'current_password' => 'oldpassword123',
+            'password' => 'password456', // letters + numbers, no special char
+            'password_confirmation' => 'password456',
         ]);
 
         $response->assertStatus(422);
@@ -55,8 +68,8 @@ class PasswordTest extends TestCase
     {
         $response = $this->putJson('/api/password', [
             'current_password' => 'x',
-            'password' => 'newpassword456',
-            'password_confirmation' => 'newpassword456',
+            'password' => 'NewPassword456!',
+            'password_confirmation' => 'NewPassword456!',
         ]);
 
         $response->assertStatus(401);

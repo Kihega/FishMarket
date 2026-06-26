@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\API;
 
+use App\Http\Controllers\API\Concerns\StoresImages;
 use App\Http\Controllers\Controller;
 use App\Models\User;
 use Illuminate\Http\Request;
@@ -9,6 +10,8 @@ use Illuminate\Support\Facades\Hash;
 
 class AuthController extends Controller
 {
+    use StoresImages;
+
     public function register(Request $request)
     {
         $data = $request->validate([
@@ -23,6 +26,9 @@ class AuthController extends Controller
             'phone' => 'nullable|string',
             'location' => 'nullable|string',
             'office_address' => 'nullable|string',
+            // Collected here now, as part of seller account creation,
+            // instead of as a separate step inside the seller dashboard.
+            'brand_logo' => 'nullable|image|max:2048',
         ], [
             'password.regex' => 'Password must contain letters, numbers, and at least one special character.',
         ]);
@@ -34,6 +40,11 @@ class AuthController extends Controller
             $data['business_name'] = ucwords(strtolower($data['business_name']));
         }
 
+        $brandLogo = null;
+        if ($request->hasFile('brand_logo')) {
+            $brandLogo = $this->storeImage($request->file('brand_logo'), 'logos');
+        }
+
         $user = User::create([
             'name' => $data['name'],
             'business_name' => $data['business_name'] ?? null,
@@ -43,6 +54,7 @@ class AuthController extends Controller
             'phone' => $data['phone'] ?? null,
             'location' => $data['location'] ?? null,
             'office_address' => $data['office_address'] ?? null,
+            'brand_logo' => $brandLogo,
             // No subscription gate — sellers are immediately active.
             // This is a research/testing build, not a live payment system.
             'subscription_status' => 'active',

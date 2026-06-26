@@ -22,6 +22,8 @@ export default function SellerSignupModal() {
     password: '',
     password_confirmation: '',
   })
+  const [logo, setLogo] = useState(null)
+  const [logoPreview, setLogoPreview] = useState(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
@@ -31,6 +33,12 @@ export default function SellerSignupModal() {
     let val = e.target.value
     if (!val.startsWith('+255')) val = '+255'
     setForm({ ...form, phone: val })
+  }
+
+  const handleLogoChange = (e) => {
+    const file = e.target.files[0]
+    setLogo(file)
+    setLogoPreview(file ? URL.createObjectURL(file) : null)
   }
 
   const handleSubmit = async (e) => {
@@ -54,17 +62,21 @@ export default function SellerSignupModal() {
     try {
       // No subscription/plan step — this is a research/testing build,
       // not a live payment system. Sellers are immediately active.
-      const { data } = await register({
-        name: form.name,
-        business_name: form.business_name,
-        email: form.email,
-        password: form.password,
-        password_confirmation: form.password_confirmation,
-        role: 'seller',
-        phone: form.phone,
-        location: form.location,
-        office_address: form.location,
-      })
+      // Brand logo is collected here, during account creation, instead
+      // of as a separate step inside the seller dashboard.
+      const fd = new FormData()
+      fd.append('name', form.name)
+      fd.append('business_name', form.business_name)
+      fd.append('email', form.email)
+      fd.append('password', form.password)
+      fd.append('password_confirmation', form.password_confirmation)
+      fd.append('role', 'seller')
+      fd.append('phone', form.phone)
+      fd.append('location', form.location)
+      fd.append('office_address', form.location)
+      if (logo) fd.append('brand_logo', logo)
+
+      const { data } = await register(fd)
 
       setAuth(data.user, data.token)
       closeModal()
@@ -132,6 +144,25 @@ export default function SellerSignupModal() {
           value={form.password_confirmation}
           onChange={update('password_confirmation')}
         />
+
+        {/* Business Brand Logo — moved here from the seller dashboard Home
+            panel, as part of account creation. Optional. */}
+        <div>
+          <label className="block text-sm text-gray-500 mb-1">Business Brand Logo (optional)</label>
+          <div className="flex items-center gap-3">
+            <div className="w-14 h-14 rounded-full border-2 border-dashed border-gray-300 flex items-center justify-center overflow-hidden bg-gray-50 flex-shrink-0">
+              {logoPreview ? (
+                <img src={logoPreview} alt="Logo preview" className="w-full h-full object-cover" />
+              ) : (
+                <Store className="w-5 h-5 text-gray-300" />
+              )}
+            </div>
+            <input
+              className="input flex-1 text-sm" type="file" accept="image/*"
+              onChange={handleLogoChange}
+            />
+          </div>
+        </div>
 
         <button
           type="submit"
