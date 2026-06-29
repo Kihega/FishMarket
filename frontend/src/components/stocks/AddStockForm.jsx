@@ -46,19 +46,19 @@ export default function AddStockForm({ onDone }) {
           onChange={(e) => setForm({ ...form, fish_name: e.target.value })}
         />
         <input
-          className="input" type="number" placeholder="Qty (kg)"
+          className="input" type="number" min="0.1" step="0.1" placeholder="Quantity (kg)"
           value={form.quantity_kg}
           onChange={(e) => setForm({ ...form, quantity_kg: e.target.value })}
         />
         <input
-          className="input" type="number" placeholder="Price/kg"
+          className="input" type="number" min="0" step="1" placeholder="Price per kg (Tsh)"
           value={form.price_per_kg}
           onChange={(e) => setForm({ ...form, price_per_kg: e.target.value })}
         />
 
         {/* Image upload with visible placeholder + live preview */}
         <div className="col-span-2">
-          <label className="block text-sm text-gray-500 mb-1">Fish Photo</label>
+          <label className="block text-sm text-gray-500 mb-1">Fish Photo (optional)</label>
           <div className="flex items-center gap-3">
             <div className="w-20 h-20 rounded-lg border-2 border-dashed border-gray-300 flex items-center justify-center overflow-hidden bg-gray-50 flex-shrink-0">
               {imagePreview ? (
