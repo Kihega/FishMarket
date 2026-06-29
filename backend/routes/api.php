@@ -20,7 +20,6 @@ Route::get('/sellers', [SellerController::class, 'index']);
 Route::get('/sellers/{user}', [SellerController::class, 'show']);
 Route::get('/stocks', [FishStockController::class, 'index']);
 Route::get('/categories', [FishCategoryController::class, 'index']);
-Route::get('/agencies', [DeliveryAgencyController::class, 'index']);
 
 // ── Protected (Sanctum token required) ───────────────────────────────────
 Route::middleware('auth:sanctum')->group(function () {
@@ -44,6 +43,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::delete('/stocks/{fishStock}', [FishStockController::class, 'destroy']);
 
     // Delivery agencies (seller only)
+    Route::get('/agencies', [DeliveryAgencyController::class, 'index']);
     Route::post('/agencies', [DeliveryAgencyController::class, 'store']);
     Route::delete('/agencies/{deliveryAgency}', [DeliveryAgencyController::class, 'destroy']);
 

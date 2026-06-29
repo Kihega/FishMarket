@@ -1,19 +1,7 @@
-import { useQuery } from '@tanstack/react-query'
-import { getSellers } from '../../api/sellers'
-import SellerCard from '../../components/sellers/SellerCard'
 import { useUIStore } from '../../store/uiStore'
 
 export default function MarketPage() {
   const { openSignupChoice } = useUIStore()
-
-  const { data, isLoading, isError, refetch, isFetching } = useQuery({
-    queryKey: ['sellers-home'],
-    queryFn: () => getSellers({}).then((r) => r.data),
-    refetchInterval: 30000,   // new sellers appear on the homepage within 30 s
-    staleTime: 0,
-    retry: 2,
-    retryDelay: 3000,
-  })
 
   return (
     <div>
@@ -46,43 +34,6 @@ export default function MarketPage() {
         <FeatureCard icon="fa-fish"  title="Fresh Catch"        text="Daily fish supply from local fishermen" />
         <FeatureCard icon="fa-store" title="Market Access"      text="Buyers connect directly with fishermen" />
         <FeatureCard icon="fa-truck" title="Fast Distribution"  text="Efficient delivery and coordination" />
-      </section>
-
-      {/* MARKETPLACE — live sellers */}
-      <section className="text-center py-16 px-4">
-        <h2 className="text-3xl font-bold text-blue-900 mb-2">Verified Sellers Near You</h2>
-        <p className="text-gray-500 mb-10">
-          Browse active fish sellers on the platform · updates every 30 s
-        </p>
-
-        {isLoading || isFetching ? (
-          <div className="flex flex-wrap justify-center gap-6">
-            {[...Array(3)].map((_, i) => (
-              <div key={i} className="w-64 h-48 bg-gray-100 animate-pulse rounded-2xl" />
-            ))}
-          </div>
-        ) : isError ? (
-          <div className="max-w-md mx-auto bg-yellow-50 border border-yellow-200 rounded-xl p-6">
-            <p className="text-yellow-800 font-medium mb-3">
-              Could not reach the backend. Make sure the backend is running and
-              VITE_API_BASE_URL in frontend/.env is correct.
-            </p>
-            <button
-              onClick={() => refetch()}
-              className="bg-blue-700 hover:bg-blue-800 text-white px-5 py-2 rounded-lg font-semibold"
-            >
-              Try Again
-            </button>
-          </div>
-        ) : data?.data?.length ? (
-          <div className="flex flex-wrap justify-center gap-6">
-            {data.data.map((seller) => (
-              <SellerCard key={seller.id} seller={seller} />
-            ))}
-          </div>
-        ) : (
-          <p className="text-gray-400">No active sellers yet — be the first to join!</p>
-        )}
       </section>
 
       {/* ABOUT */}
