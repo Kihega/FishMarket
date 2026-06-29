@@ -51,11 +51,18 @@ class DeliveryAgencyTest extends TestCase
             ->assertJsonPath('0.agency_name', 'Mine');
     }
 
-    public function test_guest_cannot_list_agencies_without_a_seller_id(): void
+    public function test_guest_is_rejected_with_401_not_a_silent_empty_list(): void
     {
+        // GET /agencies now sits fully behind auth:sanctum (the actual
+        // v12 fix for issue 3), so an unauthenticated request is
+        // rejected by the middleware itself with 401 before the
+        // controller's own "seller_id is required" 422 check ever runs.
+        // (422 would have been correct for the OLD, buggy public-route
+        // version of this endpoint — asserting it here was leftover
+        // from that and is now the wrong expectation, not a new bug.)
         $response = $this->getJson('/api/agencies');
 
-        $response->assertStatus(422);
+        $response->assertStatus(401);
     }
 
     public function test_newly_added_agency_is_visible_to_buyers_on_the_seller_page(): void
