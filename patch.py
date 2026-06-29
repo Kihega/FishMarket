@@ -21,7 +21,6 @@ Fixes:
 
 import os
 import sys
-import shutil
 import textwrap
 
 ROOT = os.path.abspath(os.getcwd())
@@ -41,10 +40,8 @@ def write(rel, content):
     print(f"  ✔  {rel}")
 
 def backup(rel):
-    """Copy original file to .bak before overwriting."""
-    src = p(rel)
-    if os.path.exists(src):
-        shutil.copy2(src, src + ".bak")
+    """No-op — project uses git for version control."""
+    pass
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 1. ENVIRONMENT FILES
@@ -1220,7 +1217,7 @@ Optional — customise the admin seed credentials without editing PHP:
     ADMIN_EMAIL=youremail@example.com
     ADMIN_PASSWORD=YourStr0ng!Pass
 
-Original files are backed up as *.bak next to each changed file.
+Original files are preserved in git — use `git diff` to review changes.
 """)
 
 
