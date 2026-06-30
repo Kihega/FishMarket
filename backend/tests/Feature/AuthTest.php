@@ -18,7 +18,7 @@ class AuthTest extends TestCase
             'password' => 'Password123!',
             'password_confirmation' => 'Password123!',
             'role' => 'buyer',
-            'phone' => '0700000000',
+            'phone' => '+255700000000',
             'location' => 'Dar es Salaam',
         ]);
 
@@ -61,6 +61,63 @@ class AuthTest extends TestCase
         $response->assertStatus(201)
             ->assertJsonPath('user.name', 'John Seller')
             ->assertJsonPath('user.business_name', 'Fresh Fish Co');
+    }
+
+    public function test_registration_rejects_phone_with_wrong_digit_count(): void
+    {
+        $response = $this->postJson('/api/register', [
+            'name' => 'Bad Phone',
+            'email' => 'badphone@example.com',
+            'password' => 'Password123!',
+            'password_confirmation' => 'Password123!',
+            'role' => 'buyer',
+            'phone' => '+25570000000', // only 8 digits after +255
+        ]);
+
+        $response->assertStatus(422);
+    }
+
+    public function test_registration_rejects_phone_without_255_prefix(): void
+    {
+        $response = $this->postJson('/api/register', [
+            'name' => 'Bad Phone',
+            'email' => 'badphone2@example.com',
+            'password' => 'Password123!',
+            'password_confirmation' => 'Password123!',
+            'role' => 'buyer',
+            'phone' => '0700000000', // local format, not +255...
+        ]);
+
+        $response->assertStatus(422);
+    }
+
+    public function test_registration_accepts_a_valid_255_phone_number(): void
+    {
+        $response = $this->postJson('/api/register', [
+            'name' => 'Good Phone',
+            'email' => 'goodphone@example.com',
+            'password' => 'Password123!',
+            'password_confirmation' => 'Password123!',
+            'role' => 'buyer',
+            'phone' => '+255712345678',
+        ]);
+
+        $response->assertStatus(201)
+            ->assertJsonPath('user.phone', '+255712345678');
+    }
+
+    public function test_registration_allows_phone_to_be_omitted_entirely(): void
+    {
+        $response = $this->postJson('/api/register', [
+            'name' => 'No Phone',
+            'email' => 'nophone@example.com',
+            'password' => 'Password123!',
+            'password_confirmation' => 'Password123!',
+            'role' => 'buyer',
+        ]);
+
+        $response->assertStatus(201)
+            ->assertJsonPath('user.phone', null);
     }
 
     public function test_registration_rejects_weak_password_without_special_character(): void

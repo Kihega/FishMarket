@@ -10,8 +10,15 @@ class OrderDelivery extends Model
     use HasFactory;
 
     protected $fillable = [
-        'order_id', 'agency_id', 'delivery_method', 'delivery_status',
+        'order_id', 'agency_id', 'delivery_fee', 'delivery_method', 'delivery_status',
     ];
+
+    protected function casts(): array
+    {
+        return [
+            'delivery_fee' => 'decimal:2',
+        ];
+    }
 
     public function order()
     {

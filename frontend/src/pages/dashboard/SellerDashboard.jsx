@@ -271,7 +271,7 @@ function BuyersPanel() {
 // ── DELIVERY PARTNERS — polls every 15 s ─────────────────────────────
 function AgenciesPanel() {
   const qc = useQueryClient()
-  const [form, setForm] = useState({ agency_name: '', contact: '', area_covered: '' })
+  const [form, setForm] = useState({ agency_name: '', contact: '', area_covered: '', delivery_fee: '' })
 
   const { data: agencies } = useQuery({
     queryKey: ['seller-agencies'],
@@ -285,7 +285,7 @@ function AgenciesPanel() {
     onSuccess: () => {
       toast.success('Delivery partner added')
       qc.invalidateQueries({ queryKey: ['seller-agencies'] })
-      setForm({ agency_name: '', contact: '', area_covered: '' })
+      setForm({ agency_name: '', contact: '', area_covered: '', delivery_fee: '' })
     },
   })
 
@@ -303,7 +303,7 @@ function AgenciesPanel() {
 
       <div className="bg-white rounded-xl shadow p-5 mb-6">
         <h2 className="font-bold text-blue-900 mb-3">Add Delivery Partner</h2>
-        <div className="grid sm:grid-cols-3 gap-3">
+        <div className="grid sm:grid-cols-4 gap-3">
           <input
             placeholder="Agency Name" className="input"
             value={form.agency_name}
@@ -318,6 +318,11 @@ function AgenciesPanel() {
             placeholder="Area Covered" className="input"
             value={form.area_covered}
             onChange={(e) => setForm({ ...form, area_covered: e.target.value })}
+          />
+          <input
+            placeholder="Delivery Fee (Tsh)" className="input" type="number" min="0" step="1"
+            value={form.delivery_fee}
+            onChange={(e) => setForm({ ...form, delivery_fee: e.target.value })}
           />
         </div>
         <button
@@ -335,7 +340,9 @@ function AgenciesPanel() {
             <div key={a.id} className="flex justify-between items-center p-4">
               <div>
                 <p className="font-semibold">{a.agency_name}</p>
-                <p className="text-sm text-gray-500">{a.contact} · {a.area_covered}</p>
+                <p className="text-sm text-gray-500">
+                  {a.contact} · {a.area_covered} · {formatTsh(a.delivery_fee)} delivery fee
+                </p>
               </div>
               <button
                 onClick={() => removeAgency.mutate(a.id)}

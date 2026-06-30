@@ -7,6 +7,7 @@ import { useUIStore } from '../../store/uiStore'
 import { useAuthStore } from '../../store/authStore'
 import { register } from '../../api/auth'
 import PasswordStrengthIndicator, { isPasswordStrong } from './PasswordStrengthIndicator'
+import { toTitleCase, formatTzPhone, isCompleteTzPhone } from '../../utils/formInput'
 
 export default function BuyerSignupModal() {
   const { closeModal, openLogin } = useUIStore()
@@ -25,10 +26,12 @@ export default function BuyerSignupModal() {
 
   const update = (field) => (e) => setForm({ ...form, [field]: e.target.value })
 
+  // The full name is usually two or three words (first/middle/last) —
+  // capitalize each one live as the buyer types.
+  const updateName = (field) => (e) => setForm({ ...form, [field]: toTitleCase(e.target.value) })
+
   const handlePhoneChange = (e) => {
-    let val = e.target.value
-    if (!val.startsWith('+255')) val = '+255'
-    setForm({ ...form, phone: val })
+    setForm({ ...form, phone: formatTzPhone(e.target.value) })
   }
 
   const handleSubmit = async (e) => {
@@ -37,6 +40,10 @@ export default function BuyerSignupModal() {
 
     if (!form.name || !form.email || !form.password) {
       setError('Please fill in all fields')
+      return
+    }
+    if (form.phone !== '+255' && !isCompleteTzPhone(form.phone)) {
+      setError('Phone number must be +255 followed by exactly 9 digits')
       return
     }
     if (form.password !== form.password_confirmation) {
@@ -56,7 +63,7 @@ export default function BuyerSignupModal() {
         password: form.password,
         password_confirmation: form.password_confirmation,
         role: 'buyer',
-        phone: form.phone,
+        phone: form.phone === '+255' ? null : form.phone,
       })
       setAuth(data.user, data.token)
       closeModal()
@@ -83,7 +90,7 @@ export default function BuyerSignupModal() {
       )}
 
       <form onSubmit={handleSubmit} className="space-y-3">
-        <Field icon={User} placeholder="Full Name" value={form.name} onChange={update('name')} />
+        <Field icon={User} placeholder="Full Name" value={form.name} onChange={updateName('name')} />
         <Field
           icon={Phone}
           placeholder="+255 7XX XXX XXX"

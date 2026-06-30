@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\API;
 
 use App\Http\Controllers\Controller;
+use App\Models\DeliveryAgency;
 use App\Models\Order;
 use App\Models\OrderDelivery;
 use App\Models\FishStock;
@@ -21,15 +22,32 @@ class OrderController extends Controller
             'items.*.stock_id' => 'required|exists:fish_stocks,id',
             'items.*.quantity_kg' => 'required|numeric|min:0.1',
             'payment_method' => 'required|in:mobile,bank',
-            'agency_id' => 'required|exists:delivery_agencies,id',
+            // Choosing a delivery agency is optional — a buyer may
+            // arrange their own delivery instead.
+            'agency_id' => 'nullable|exists:delivery_agencies,id',
             'delivery_method' => 'nullable|string',
         ]);
+
+        $deliveryFee = 0;
+        $agency = null;
+
+        if (! empty($data['agency_id'])) {
+            $agency = DeliveryAgency::where('id', $data['agency_id'])
+                ->where('seller_id', $data['seller_id'])
+                ->where('is_active', true)
+                ->first();
+
+            abort_unless($agency, 422, 'Selected delivery agency is not available for this seller.');
+
+            $deliveryFee = (float) $agency->delivery_fee;
+        }
 
         $total = 0;
         $orderItems = [];
 
         foreach ($data['items'] as $item) {
             $stock = FishStock::findOrFail($item['stock_id']);
+            abort_unless((int) $stock->seller_id === (int) $data['seller_id'], 422, 'One of the items no longer belongs to this seller.');
             abort_if($stock->quantity_kg < $item['quantity_kg'], 422, 'Insufficient stock for '.$stock->fish_name);
 
             $subtotal = $stock->price_per_kg * $item['quantity_kg'];
@@ -44,6 +62,8 @@ class OrderController extends Controller
             ];
         }
 
+        $total += $deliveryFee;
+
         $order = Order::create([
             'buyer_id' => $request->user()->id,
             'seller_id' => $data['seller_id'],
@@ -57,11 +77,20 @@ class OrderController extends Controller
             $order->items()->create($item);
         }
 
-        OrderDelivery::create([
-            'order_id' => $order->id,
-            'agency_id' => $data['agency_id'],
-            'delivery_method' => $data['delivery_method'] ?? null,
-        ]);
+        // Only record a delivery row when the buyer actually chose one
+        // of the seller's agencies — otherwise they're arranging their
+        // own delivery, so there's nothing to track here.
+        if ($agency) {
+            OrderDelivery::create([
+                'order_id' => $order->id,
+                'agency_id' => $agency->id,
+                // Snapshotted at order time (like fish_name/price_per_kg
+                // on OrderItem) so a later change to the agency's fee
+                // never rewrites the cost of a past order.
+                'delivery_fee' => $deliveryFee,
+                'delivery_method' => $data['delivery_method'] ?? null,
+            ]);
+        }
 
         return response()->json($order->load('items', 'delivery'), 201);
     }

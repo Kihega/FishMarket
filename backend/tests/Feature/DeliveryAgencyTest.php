@@ -65,6 +65,34 @@ class DeliveryAgencyTest extends TestCase
         $response->assertStatus(401);
     }
 
+    public function test_seller_can_set_a_delivery_fee_when_registering_an_agency(): void
+    {
+        // Every agency may charge a different fee depending on the area
+        // it serves, so the fee is captured once here, at registration.
+        $seller = User::factory()->seller()->create();
+
+        $response = $this->actingAs($seller, 'sanctum')->postJson('/api/agencies', [
+            'agency_name' => 'Coastal Express',
+            'area_covered' => 'Dar es Salaam',
+            'delivery_fee' => 3500,
+        ]);
+
+        $response->assertStatus(201)
+            ->assertJsonPath('delivery_fee', '3500.00');
+    }
+
+    public function test_agency_delivery_fee_defaults_to_zero_when_not_given(): void
+    {
+        $seller = User::factory()->seller()->create();
+
+        $response = $this->actingAs($seller, 'sanctum')->postJson('/api/agencies', [
+            'agency_name' => 'No Fee Listed',
+        ]);
+
+        $response->assertStatus(201)
+            ->assertJsonPath('delivery_fee', '0.00');
+    }
+
     public function test_newly_added_agency_is_visible_to_buyers_on_the_seller_page(): void
     {
         // Covers the buyer-side half: SellerController::show() already

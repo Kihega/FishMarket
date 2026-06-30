@@ -32,6 +32,10 @@ class DeliveryAgencyController extends Controller
                 'agency_name' => 'required|string',
                 'contact' => 'nullable|string',
                 'area_covered' => 'nullable|string',
+                // Every agency may charge a different fee depending on
+                // the area it serves, so it's set once here at
+                // registration rather than per order.
+                'delivery_fee' => 'nullable|numeric|min:0',
             ])
         );
 

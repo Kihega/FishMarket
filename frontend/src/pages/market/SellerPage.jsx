@@ -58,7 +58,7 @@ export default function SellerPage() {
           <div className="flex flex-wrap gap-3">
             {agencies.map((a) => (
               <span key={a.id} className="bg-blue-50 text-blue-700 px-3 py-1 rounded-full text-sm">
-                {a.agency_name} · {a.area_covered}
+                {a.agency_name} · {a.area_covered} · {formatTsh(a.delivery_fee)}
               </span>
             ))}
           </div>
