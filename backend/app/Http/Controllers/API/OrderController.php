@@ -13,6 +13,10 @@ use Illuminate\Support\Str;
 
 class OrderController extends Controller
 {
+    // How long a buyer has, after placing an order, to cancel it
+    // themselves without seller involvement.
+    private const CANCEL_WINDOW_MINUTES = 2;
+
     // Buyer places an order (one or more fish items from one seller)
     public function store(Request $request)
     {
@@ -130,6 +134,56 @@ class OrderController extends Controller
         );
 
         return response()->json($order->load('items', 'bill'));
+    }
+
+    // Buyer: cancel their own order, but only within the first
+    // CANCEL_WINDOW_MINUTES minutes and only before the seller has
+    // confirmed/processed it. After that, the order has to play out.
+    public function cancel(Request $request, Order $order)
+    {
+        abort_unless($order->buyer_id === $request->user()->id, 403);
+
+        abort_if(
+            in_array($order->status, ['confirmed', 'processed', 'cancelled']),
+            422,
+            'This order can no longer be cancelled.'
+        );
+
+        abort_if(
+            $order->created_at->diffInMinutes(now()) > self::CANCEL_WINDOW_MINUTES,
+            422,
+            'The '.self::CANCEL_WINDOW_MINUTES.'-minute cancellation window has expired.'
+        );
+
+        $order->update(['status' => 'cancelled']);
+
+        return response()->json($order);
+    }
+
+    // Buyer: confirm physical delivery was received. Sets the
+    // delivery status to 'delivered', which is what the seller sees
+    // in their "Manage Buyers" panel. If the buyer arranged their own
+    // delivery (no agency chosen at checkout, so no OrderDelivery row
+    // exists yet), one is created here on the fly.
+    public function confirmDelivery(Request $request, Order $order)
+    {
+        abort_unless($order->buyer_id === $request->user()->id, 403);
+
+        abort_unless(
+            in_array($order->status, ['confirmed', 'processed']),
+            422,
+            'Order has not been confirmed by the seller yet.'
+        );
+
+        $delivery = $order->delivery ?? $order->delivery()->create([
+            'agency_id' => null,
+            'delivery_fee' => 0,
+            'delivery_status' => 'pending',
+        ]);
+
+        $delivery->update(['delivery_status' => 'delivered']);
+
+        return response()->json($order->load('items', 'delivery', 'bill'));
     }
 
     // List orders for the current user (buyer sees own orders, seller sees incoming orders)

@@ -38,6 +38,9 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/seller/subscription', [SubscriptionController::class, 'mine']);
 
     // Fish stocks (seller only — enforced in controller)
+    // /seller/stocks is the seller's OWN scoped list (used by the
+    // dashboard) — distinct from the public /stocks marketplace feed.
+    Route::get('/seller/stocks', [FishStockController::class, 'mine']);
     Route::post('/stocks', [FishStockController::class, 'store']);
     Route::put('/stocks/{fishStock}', [FishStockController::class, 'update']);
     Route::delete('/stocks/{fishStock}', [FishStockController::class, 'destroy']);
@@ -52,6 +55,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/orders', [OrderController::class, 'store']);
     Route::post('/orders/{order}/pay', [OrderController::class, 'pay']);
     Route::post('/orders/{order}/confirm', [OrderController::class, 'confirm']);
+    Route::post('/orders/{order}/cancel', [OrderController::class, 'cancel']);
+    Route::post('/orders/{order}/confirm-delivery', [OrderController::class, 'confirmDelivery']);
 
     // Admin only
     Route::middleware('admin')->prefix('admin')->group(function () {
