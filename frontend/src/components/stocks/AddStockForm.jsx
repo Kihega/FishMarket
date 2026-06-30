@@ -3,33 +3,21 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { createStock } from '../../api/stocks'
 import toast from 'react-hot-toast'
 
+// Image upload was removed from this form entirely — it was crashing
+// the page. Stocks can still be added with no photo (the backend
+// already treats the image field as optional).
 export default function AddStockForm({ onDone }) {
   const qc = useQueryClient()
   const [form, setForm] = useState({
     fish_name: '', quantity_kg: '', price_per_kg: '',
   })
-  const [image, setImage] = useState(null)
-  const [imagePreview, setImagePreview] = useState(null)
-
-  const handleImageChange = (e) => {
-    const file = e.target.files[0]
-    setImage(file)
-    setImagePreview(file ? URL.createObjectURL(file) : null)
-  }
 
   const add = useMutation({
-    mutationFn: () => {
-      const fd = new FormData()
-      Object.entries(form).forEach(([k, v]) => fd.append(k, v))
-      if (image) fd.append('image', image)
-      return createStock(fd)
-    },
+    mutationFn: () => createStock(form),
     onSuccess: () => {
       toast.success('Stock added!')
       qc.invalidateQueries(['seller-stocks'])
       setForm({ fish_name: '', quantity_kg: '', price_per_kg: '' })
-      setImage(null)
-      setImagePreview(null)
       onDone?.()
     },
     onError: () => toast.error('Failed to add stock'),
@@ -55,24 +43,6 @@ export default function AddStockForm({ onDone }) {
           value={form.price_per_kg}
           onChange={(e) => setForm({ ...form, price_per_kg: e.target.value })}
         />
-
-        {/* Image upload with visible placeholder + live preview */}
-        <div className="col-span-2">
-          <label className="block text-sm text-gray-500 mb-1">Fish Photo (optional)</label>
-          <div className="flex items-center gap-3">
-            <div className="w-20 h-20 rounded-lg border-2 border-dashed border-gray-300 flex items-center justify-center overflow-hidden bg-gray-50 flex-shrink-0">
-              {imagePreview ? (
-                <img src={imagePreview} alt="Preview" className="w-full h-full object-cover" />
-              ) : (
-                <span className="text-gray-400 text-xs text-center px-1">No image</span>
-              )}
-            </div>
-            <input
-              className="input flex-1" type="file" accept="image/*"
-              onChange={handleImageChange}
-            />
-          </div>
-        </div>
       </div>
 
       <button

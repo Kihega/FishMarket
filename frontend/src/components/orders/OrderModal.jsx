@@ -1,26 +1,34 @@
 import { useState } from 'react'
-import { Smartphone, Landmark } from 'lucide-react'
+import { Smartphone, Landmark, Phone } from 'lucide-react'
 import { placeOrder, payOrder } from '../../api/orders'
 import { formatTsh } from '../../utils/currency'
 import toast from 'react-hot-toast'
 
 export default function OrderModal({ data: { stock, seller, agencies }, onClose }) {
   const [qty, setQty]       = useState(1)
+  // '' = no agency chosen yet, 'self' = buyer will arrange their own
+  // delivery, otherwise an agency id.
   const [agency, setAgency] = useState('')
   const [method, setMethod] = useState('mobile')
   const [loading, setLoading] = useState(false)
 
-  const total = (qty * stock.price_per_kg).toFixed(2)
+  const hasAgencies = agencies?.length > 0
+  const selectedAgency = agencies?.find((a) => String(a.id) === String(agency))
+  const deliveryFee = selectedAgency ? Number(selectedAgency.delivery_fee) : 0
+  const subtotal = qty * stock.price_per_kg
+  const total = (subtotal + deliveryFee).toFixed(2)
 
   const handleOrder = async () => {
-    if (!agency) return toast.error('Choose a delivery agency')
+    // Agency selection is optional — the buyer may arrange their own
+    // delivery — so there's nothing to validate here beyond what the
+    // <select> already allows.
     setLoading(true)
     try {
       const { data: order } = await placeOrder({
         seller_id: seller.id,
         items: [{ stock_id: stock.id, quantity_kg: qty }],
         payment_method: method,
-        agency_id: agency,
+        agency_id: selectedAgency ? selectedAgency.id : null,
       })
       await payOrder(order.id)   // mark as paid immediately (demo flow)
       toast.success('Order placed & payment recorded!')
@@ -42,14 +50,27 @@ export default function OrderModal({ data: { stock, seller, agencies }, onClose 
           value={qty} onChange={e => setQty(Number(e.target.value))}
           className="input mb-4" />
 
-        <label className="block text-sm mb-1">Delivery Agency</label>
-        <select value={agency} onChange={e => setAgency(e.target.value)} className="input mb-4">
-          <option value="">Select agency…</option>
-          {agencies.map(a => <option key={a.id} value={a.id}>{a.agency_name} – {a.area_covered}</option>)}
-        </select>
+        <label className="block text-sm mb-1">Delivery</label>
+        {hasAgencies ? (
+          <select value={agency} onChange={e => setAgency(e.target.value)} className="input mb-1">
+            <option value="">I'll arrange my own delivery</option>
+            {agencies.map(a => (
+              <option key={a.id} value={a.id}>
+                {a.agency_name} – {a.area_covered} ({formatTsh(a.delivery_fee)})
+              </option>
+            ))}
+          </select>
+        ) : (
+          <p className="text-sm text-gray-500 mb-1">
+            This seller has no delivery partner listed — you'll need to arrange your own delivery.
+          </p>
+        )}
+        <p className="text-xs text-gray-400 mb-4">
+          Choosing a delivery partner is optional — skip it if you have your own delivery arrangement.
+        </p>
 
         <label className="block text-sm mb-1">Payment Method</label>
-        <div className="flex gap-4 mb-6">
+        <div className="flex gap-4 mb-3">
           <label className="flex items-center gap-2 cursor-pointer">
             <input type="radio" value="mobile" checked={method === 'mobile'} onChange={() => setMethod('mobile')} />
             <Smartphone className="w-4 h-4" /> Mobile Money
@@ -60,8 +81,23 @@ export default function OrderModal({ data: { stock, seller, agencies }, onClose 
           </label>
         </div>
 
-        <div className="bg-blue-50 rounded-lg p-3 mb-4">
-          <p className="font-semibold text-blue-900">Total: {formatTsh(total)}</p>
+        {method === 'mobile' && seller.phone && (
+          <div className="bg-green-50 text-green-800 rounded-lg p-3 mb-4 flex items-center gap-2 text-sm">
+            <Phone className="w-4 h-4 flex-shrink-0" />
+            Send mobile money to the seller at <span className="font-semibold">{seller.phone}</span>
+          </div>
+        )}
+
+        <div className="bg-blue-50 rounded-lg p-3 mb-4 space-y-1">
+          <p className="text-sm text-blue-800 flex justify-between">
+            <span>Fish subtotal</span><span>{formatTsh(subtotal)}</span>
+          </p>
+          <p className="text-sm text-blue-800 flex justify-between">
+            <span>Delivery fee</span><span>{deliveryFee ? formatTsh(deliveryFee) : '—'}</span>
+          </p>
+          <p className="font-semibold text-blue-900 flex justify-between border-t border-blue-200 pt-1 mt-1">
+            <span>Total</span><span>{formatTsh(total)}</span>
+          </p>
         </div>
 
         <div className="flex gap-3">

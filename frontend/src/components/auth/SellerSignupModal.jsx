@@ -7,6 +7,7 @@ import { useUIStore } from '../../store/uiStore'
 import { useAuthStore } from '../../store/authStore'
 import { register } from '../../api/auth'
 import PasswordStrengthIndicator, { isPasswordStrong } from './PasswordStrengthIndicator'
+import { toTitleCase, formatTzPhone, isCompleteTzPhone } from '../../utils/formInput'
 
 export default function SellerSignupModal() {
   const { closeModal, openLogin } = useUIStore()
@@ -29,10 +30,14 @@ export default function SellerSignupModal() {
 
   const update = (field) => (e) => setForm({ ...form, [field]: e.target.value })
 
+  // Names are typically two or three words (first/middle/last) — each
+  // word is capitalized live as the seller types, so the form already
+  // shows "John Peter Mwasege" instead of relying on the backend to
+  // fix it after submit.
+  const updateName = (field) => (e) => setForm({ ...form, [field]: toTitleCase(e.target.value) })
+
   const handlePhoneChange = (e) => {
-    let val = e.target.value
-    if (!val.startsWith('+255')) val = '+255'
-    setForm({ ...form, phone: val })
+    setForm({ ...form, phone: formatTzPhone(e.target.value) })
   }
 
   const handleLogoChange = (e) => {
@@ -47,6 +52,10 @@ export default function SellerSignupModal() {
 
     if (!form.name || !form.business_name || !form.location || !form.email || !form.password) {
       setError('Please fill in all fields')
+      return
+    }
+    if (form.phone !== '+255' && !isCompleteTzPhone(form.phone)) {
+      setError('Phone number must be +255 followed by exactly 9 digits')
       return
     }
     if (form.password !== form.password_confirmation) {
@@ -71,7 +80,7 @@ export default function SellerSignupModal() {
       fd.append('password', form.password)
       fd.append('password_confirmation', form.password_confirmation)
       fd.append('role', 'seller')
-      fd.append('phone', form.phone)
+      if (form.phone !== '+255') fd.append('phone', form.phone)
       fd.append('location', form.location)
       fd.append('office_address', form.location)
       if (logo) fd.append('brand_logo', logo)
@@ -103,7 +112,7 @@ export default function SellerSignupModal() {
       )}
 
       <form onSubmit={handleSubmit} className="space-y-3">
-        <Field icon={User} placeholder="Full Name" value={form.name} onChange={update('name')} />
+        <Field icon={User} placeholder="Full Name" value={form.name} onChange={updateName('name')} />
         <Field
           icon={Store}
           placeholder="Business / Brand Name"

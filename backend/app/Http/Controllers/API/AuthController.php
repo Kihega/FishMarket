@@ -23,7 +23,11 @@ class AuthController extends Controller
                 'regex:/^(?=.*[a-zA-Z])(?=.*\d)(?=.*[^a-zA-Z\d]).+$/',
             ],
             'role' => 'required|in:seller,buyer',
-            'phone' => 'nullable|string',
+            // +255 followed by exactly 9 digits (e.g. +255712345678).
+            // Stays optional — 'nullable' skips this rule entirely when
+            // the field isn't sent at all, but enforces the exact
+            // format whenever a value is present.
+            'phone' => ['nullable', 'regex:/^\+255\d{9}$/'],
             'location' => 'nullable|string',
             'office_address' => 'nullable|string',
             // Collected here now, as part of seller account creation,
@@ -31,6 +35,7 @@ class AuthController extends Controller
             'brand_logo' => 'nullable|image|max:2048',
         ], [
             'password.regex' => 'Password must contain letters, numbers, and at least one special character.',
+            'phone.regex' => 'Phone number must be +255 followed by exactly 9 digits.',
         ]);
 
         // Auto-capitalize each word (e.g. "john doe" -> "John Doe") rather
