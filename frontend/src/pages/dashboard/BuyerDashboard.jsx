@@ -1,8 +1,9 @@
 import { useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
+import toast from 'react-hot-toast'
 import { Fish, MapPin, Receipt } from 'lucide-react'
-import { getOrders } from '../../api/orders'
+import { getOrders, cancelOrder, confirmDelivery } from '../../api/orders'
 import { getSellers } from '../../api/sellers'
 import { resolveImage } from '../../api/client'
 import { useAuthStore } from '../../store/authStore'
@@ -25,6 +26,11 @@ const STATUS_STYLE = {
   processed: 'bg-gray-100 text-gray-700',
   cancelled: 'bg-red-100 text-red-600',
 }
+
+// Buyers can self-cancel only within this many minutes of placing the
+// order, and only before the seller has confirmed it — mirrors the
+// backend's OrderController::CANCEL_WINDOW_MINUTES.
+const CANCEL_WINDOW_MINUTES = 2
 
 export default function BuyerDashboard() {
   const [active, setActive] = useState('home')
@@ -108,13 +114,52 @@ function HomePanel() {
   )
 }
 
+// Whether an order is still inside the self-cancel window and not yet
+// acted on by the seller.
+function canCancel(order) {
+  if (order.status !== 'pending' && order.status !== 'received') return false
+  const ageMinutes = (Date.now() - new Date(order.created_at).getTime()) / 60000
+  return ageMinutes <= CANCEL_WINDOW_MINUTES
+}
+
+// Whether the buyer can confirm delivery — seller has confirmed (or
+// processed) the order and it hasn't already been marked delivered.
+function canConfirmDelivery(order) {
+  return (order.status === 'confirmed' || order.status === 'processed')
+    && order.delivery?.delivery_status !== 'delivered'
+}
+
 // ── MY ORDERS — polls every 15 s ─────────────────────────────────────
 function OrdersPanel() {
+  const qc = useQueryClient()
+
   const { data, isLoading } = useQuery({
     queryKey: ['my-orders'],
     queryFn: () => getOrders().then((r) => r.data),
     refetchInterval: 15000,
     staleTime: 0,
+  })
+
+  const cancel = useMutation({
+    mutationFn: (id) => cancelOrder(id),
+    onSuccess: () => {
+      toast.success('Order cancelled')
+      qc.invalidateQueries({ queryKey: ['my-orders'] })
+    },
+    onError: (err) => {
+      toast.error(err?.response?.data?.message || 'Could not cancel order')
+    },
+  })
+
+  const confirmDeliveryMutation = useMutation({
+    mutationFn: (id) => confirmDelivery(id),
+    onSuccess: () => {
+      toast.success('Delivery confirmed — thanks!')
+      qc.invalidateQueries({ queryKey: ['my-orders'] })
+    },
+    onError: (err) => {
+      toast.error(err?.response?.data?.message || 'Could not confirm delivery')
+    },
   })
 
   return (
@@ -134,6 +179,11 @@ function OrdersPanel() {
                   <p className="text-gray-500 text-sm">
                     {order.items?.length} item(s) · {formatTsh(order.total_amount)}
                   </p>
+                  {order.delivery && (
+                    <p className="text-xs text-gray-400 mt-1 capitalize">
+                      Delivery: {order.delivery.delivery_status}
+                    </p>
+                  )}
                 </div>
                 <span className={`text-xs px-3 py-1 rounded-full font-medium ${STATUS_STYLE[order.status] ?? ''}`}>
                   {order.status?.toUpperCase()}
@@ -144,6 +194,27 @@ function OrdersPanel() {
                   <Receipt className="w-4 h-4" /> Bill #{order.bill.bill_number}
                 </p>
               )}
+
+              <div className="flex gap-3 mt-3">
+                {canCancel(order) && (
+                  <button
+                    onClick={() => cancel.mutate(order.id)}
+                    disabled={cancel.isPending}
+                    className="text-red-500 text-sm hover:underline"
+                  >
+                    Cancel Order
+                  </button>
+                )}
+                {canConfirmDelivery(order) && (
+                  <button
+                    onClick={() => confirmDeliveryMutation.mutate(order.id)}
+                    disabled={confirmDeliveryMutation.isPending}
+                    className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 text-sm"
+                  >
+                    Confirm Delivery
+                  </button>
+                )}
+              </div>
             </div>
           ))}
         </div>

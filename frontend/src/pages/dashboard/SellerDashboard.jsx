@@ -3,13 +3,14 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
 import client, { resolveImage } from '../../api/client'
 import { getOrders, confirmOrder } from '../../api/orders'
-import { getStocks, deleteStock } from '../../api/stocks'
+import { getMyStocks } from '../../api/stocks'
 import { useAuthStore } from '../../store/authStore'
 import { formatTsh } from '../../utils/currency'
 import DashboardLayout from '../../components/dashboard/DashboardLayout'
 import ChangePasswordModal from '../../components/dashboard/ChangePasswordModal'
 import ModalShell from '../../components/auth/ModalShell'
 import AddStockForm from '../../components/stocks/AddStockForm'
+import EditStockForm from '../../components/stocks/EditStockForm'
 import {
   HomeIcon, ClipboardListIcon, PackageIcon, ContactIcon,
   TruckIcon, LockIcon, LogoutIcon,
@@ -60,7 +61,7 @@ function HomePanel() {
   })
   const { data: stocks } = useQuery({
     queryKey: ['seller-stocks'],
-    queryFn: () => getStocks({}).then((r) => r.data),
+    queryFn: () => getMyStocks().then((r) => r.data),
     refetchInterval: 30000,
     staleTime: 0,
   })
@@ -150,20 +151,13 @@ function OrdersPanel() {
 function StocksPanel() {
   const qc = useQueryClient()
   const [showAddForm, setShowAddForm] = useState(false)
+  const [editingStock, setEditingStock] = useState(null)
 
   const { data: stocks } = useQuery({
     queryKey: ['seller-stocks'],
-    queryFn: () => getStocks({}).then((r) => r.data),
+    queryFn: () => getMyStocks().then((r) => r.data),
     refetchInterval: 15000,
     staleTime: 0,
-  })
-
-  const remove = useMutation({
-    mutationFn: (id) => deleteStock(id),
-    onSuccess: () => {
-      toast.success('Stock removed')
-      qc.invalidateQueries({ queryKey: ['seller-stocks'] })
-    },
   })
 
   return (
@@ -200,10 +194,10 @@ function StocksPanel() {
                 {s.status === 'active' ? '● In Stock' : '● Out of Stock'}
               </span>
               <button
-                onClick={() => remove.mutate(s.id)}
-                className="mt-3 text-red-500 text-sm hover:underline self-start"
+                onClick={() => setEditingStock(s)}
+                className="mt-3 text-blue-600 text-sm hover:underline self-start"
               >
-                Remove Stock
+                Edit Stock
               </button>
             </div>
           ))
@@ -217,6 +211,15 @@ function StocksPanel() {
       {showAddForm && (
         <ModalShell onClose={() => setShowAddForm(false)} maxWidth="max-w-lg">
           <AddStockForm onDone={() => { setShowAddForm(false); qc.invalidateQueries({ queryKey: ['seller-stocks'] }) }} />
+        </ModalShell>
+      )}
+
+      {editingStock && (
+        <ModalShell onClose={() => setEditingStock(null)} maxWidth="max-w-lg">
+          <EditStockForm
+            stock={editingStock}
+            onDone={() => { setEditingStock(null); qc.invalidateQueries({ queryKey: ['seller-stocks'] }) }}
+          />
         </ModalShell>
       )}
     </div>
