@@ -30,7 +30,14 @@ class OrderController extends Controller
             // arrange their own delivery instead.
             'agency_id' => 'nullable|exists:delivery_agencies,id',
             'delivery_method' => 'nullable|string',
+            // Required whenever an agency is chosen: the exact physical
+            // location the buyer wants the order delivered to.
+            'delivery_address' => 'nullable|string|max:500',
         ]);
+
+        if (! empty($data['agency_id']) && empty(trim($data['delivery_address'] ?? ''))) {
+            abort(422, 'Please enter the physical location for delivery.');
+        }
 
         $deliveryFee = 0;
         $agency = null;
@@ -92,6 +99,7 @@ class OrderController extends Controller
                 // on OrderItem) so a later change to the agency's fee
                 // never rewrites the cost of a past order.
                 'delivery_fee' => $deliveryFee,
+                'delivery_address' => trim($data['delivery_address']),
                 'delivery_method' => $data['delivery_method'] ?? null,
             ]);
         }

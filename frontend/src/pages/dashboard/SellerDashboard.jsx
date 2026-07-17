@@ -260,6 +260,11 @@ function BuyersPanel() {
                 <p className="text-xs text-gray-400 mt-1 capitalize">
                   Delivery: {b.delivery_status}
                 </p>
+                {b.delivery_address && (
+                  <p className="text-xs text-gray-400 mt-1 max-w-xs text-right">
+                    Deliver to: {b.delivery_address}
+                  </p>
+                )}
               </div>
             </div>
           ))
