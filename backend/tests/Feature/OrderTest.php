@@ -44,12 +44,33 @@ class OrderTest extends TestCase
             'items' => [['stock_id' => $stock->id, 'quantity_kg' => 2]],
             'payment_method' => 'mobile',
             'agency_id' => $agency->id,
+            'delivery_address' => '123 Uhuru Street, Dar es Salaam',
         ]);
 
         $response->assertStatus(201)
             ->assertJsonPath('total_amount', '12000.00') // 10000 fish + 2000 delivery
             ->assertJsonPath('delivery.delivery_fee', '2000.00')
-            ->assertJsonPath('delivery.agency_id', $agency->id);
+            ->assertJsonPath('delivery.agency_id', $agency->id)
+            ->assertJsonPath('delivery.delivery_address', '123 Uhuru Street, Dar es Salaam');
+    }
+
+    public function test_order_rejected_when_agency_chosen_without_a_delivery_address(): void
+    {
+        // delivery_address is now required once an agency is chosen,
+        // so the agency/delivery driver knows exactly where to go.
+        $seller = User::factory()->seller()->create();
+        $buyer = User::factory()->create();
+        $stock = FishStock::factory()->create(['seller_id' => $seller->id, 'quantity_kg' => 10, 'price_per_kg' => 5000]);
+        $agency = DeliveryAgency::factory()->create(['seller_id' => $seller->id, 'delivery_fee' => 2000]);
+
+        $response = $this->actingAs($buyer, 'sanctum')->postJson('/api/orders', [
+            'seller_id' => $seller->id,
+            'items' => [['stock_id' => $stock->id, 'quantity_kg' => 2]],
+            'payment_method' => 'mobile',
+            'agency_id' => $agency->id,
+        ]);
+
+        $response->assertStatus(422);
     }
 
     public function test_changing_an_agencys_fee_later_does_not_change_a_past_orders_total(): void
@@ -66,6 +87,7 @@ class OrderTest extends TestCase
             'items' => [['stock_id' => $stock->id, 'quantity_kg' => 1]],
             'payment_method' => 'mobile',
             'agency_id' => $agency->id,
+            'delivery_address' => '45 Kariakoo Road, Dar es Salaam',
         ]);
         $orderId = $response->json('id');
 
