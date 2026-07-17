@@ -83,6 +83,7 @@ class SellerController extends Controller
                 'order_status' => $order->status,
                 'payment_status' => $order->payment_status,
                 'delivery_status' => $order->delivery?->delivery_status ?? 'pending',
+                'delivery_address' => $order->delivery?->delivery_address,
             ];
         });
 

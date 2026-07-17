@@ -9,6 +9,7 @@ export default function OrderModal({ data: { stock, seller, agencies }, onClose 
   // '' = no agency chosen yet, 'self' = buyer will arrange their own
   // delivery, otherwise an agency id.
   const [agency, setAgency] = useState('')
+  const [deliveryAddress, setDeliveryAddress] = useState('')
   const [method, setMethod] = useState('mobile')
   const [loading, setLoading] = useState(false)
 
@@ -20,8 +21,12 @@ export default function OrderModal({ data: { stock, seller, agencies }, onClose 
 
   const handleOrder = async () => {
     // Agency selection is optional — the buyer may arrange their own
-    // delivery — so there's nothing to validate here beyond what the
-    // <select> already allows.
+    // delivery. But once an agency IS chosen, the exact physical
+    // delivery location is required so the agency knows where to go.
+    if (selectedAgency && !deliveryAddress.trim()) {
+      toast.error('Please enter the physical location for delivery')
+      return
+    }
     setLoading(true)
     try {
       const { data: order } = await placeOrder({
@@ -29,6 +34,7 @@ export default function OrderModal({ data: { stock, seller, agencies }, onClose 
         items: [{ stock_id: stock.id, quantity_kg: qty }],
         payment_method: method,
         agency_id: selectedAgency ? selectedAgency.id : null,
+        delivery_address: selectedAgency ? deliveryAddress.trim() : null,
       })
       await payOrder(order.id)   // mark as paid immediately (demo flow)
       toast.success('Order placed & payment recorded!')
@@ -68,6 +74,19 @@ export default function OrderModal({ data: { stock, seller, agencies }, onClose 
         <p className="text-xs text-gray-400 mb-4">
           Choosing a delivery partner is optional — skip it if you have your own delivery arrangement.
         </p>
+
+        {selectedAgency && (
+          <>
+            <label className="block text-sm mb-1">Delivery Location</label>
+            <textarea
+              value={deliveryAddress}
+              onChange={e => setDeliveryAddress(e.target.value)}
+              placeholder="Enter the exact physical location you want this order delivered to (street, landmark, area, etc.)"
+              rows={2}
+              className="input mb-4"
+            />
+          </>
+        )}
 
         <label className="block text-sm mb-1">Payment Method</label>
         <div className="flex gap-4 mb-3">
