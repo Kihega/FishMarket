@@ -24,10 +24,9 @@ class AuthController extends Controller
             ],
             'role' => 'required|in:seller,buyer',
             // +255 followed by exactly 9 digits (e.g. +255712345678).
-            // Stays optional — 'nullable' skips this rule entirely when
-            // the field isn't sent at all, but enforces the exact
-            // format whenever a value is present.
-            'phone' => ['nullable', 'regex:/^\+255\d{9}$/'],
+            // REQUIRED for buyers — the seller needs a real number to
+            // call them about delivery. Sellers can still skip it.
+            'phone' => ['required_if:role,buyer', 'regex:/^\+255\d{9}$/'],
             'location' => 'nullable|string',
             'office_address' => 'nullable|string',
             // Collected here now, as part of seller account creation,
@@ -36,6 +35,7 @@ class AuthController extends Controller
         ], [
             'password.regex' => 'Password must contain letters, numbers, and at least one special character.',
             'phone.regex' => 'Phone number must be +255 followed by exactly 9 digits.',
+            'phone.required_if' => 'A valid Tanzanian mobile number is required to create a buyer account.',
         ]);
 
         // Auto-capitalize each word (e.g. "john doe" -> "John Doe") rather

@@ -33,11 +33,6 @@ class User extends Authenticatable
         return $this->hasMany(FishStock::class, 'seller_id');
     }
 
-    public function deliveryAgencies()
-    {
-        return $this->hasMany(DeliveryAgency::class, 'seller_id');
-    }
-
     public function ordersAsBuyer()
     {
         return $this->hasMany(Order::class, 'buyer_id');

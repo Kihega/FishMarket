@@ -16,13 +16,13 @@ export default function SellerPage() {
   const { data, isLoading } = useQuery({
     queryKey: ['seller', id],
     queryFn: () => getSeller(id).then((r) => r.data),
-    refetchInterval: 20000,     // stocks + agencies refresh every 20 s
+    refetchInterval: 20000,     // stocks refresh every 20 s
     staleTime: 0,
   })
 
   if (isLoading) return <div className="p-8">Loading seller…</div>
 
-  const { seller, stocks, agencies } = data
+  const { seller, stocks } = data
 
   return (
     <div className="container mx-auto px-4 py-8">
@@ -51,20 +51,6 @@ export default function SellerPage() {
         </div>
       </div>
 
-      {/* Delivery Agencies */}
-      {agencies?.length > 0 && (
-        <div className="mb-8">
-          <h2 className="text-lg font-bold text-blue-800 mb-3">Delivery Partners</h2>
-          <div className="flex flex-wrap gap-3">
-            {agencies.map((a) => (
-              <span key={a.id} className="bg-blue-50 text-blue-700 px-3 py-1 rounded-full text-sm">
-                {a.agency_name} · {a.area_covered} · {formatTsh(a.delivery_fee)}
-              </span>
-            ))}
-          </div>
-        </div>
-      )}
-
       {/* Fish Stock Grid */}
       <h2 className="text-xl font-bold text-blue-800 mb-4">
         Available Fish
@@ -90,7 +76,7 @@ export default function SellerPage() {
               <p className="text-blue-700 font-bold">{formatTsh(stock.price_per_kg)} / kg</p>
               {user && (
                 <button
-                  onClick={() => setOrderItem({ stock, seller, agencies })}
+                  onClick={() => setOrderItem({ stock, seller })}
                   className="mt-3 w-full bg-blue-600 text-white py-1.5 rounded-lg hover:bg-blue-700 text-sm"
                 >
                   Order Now

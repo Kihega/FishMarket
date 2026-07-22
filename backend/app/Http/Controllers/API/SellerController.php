@@ -24,7 +24,7 @@ class SellerController extends Controller
         return response()->json($sellers);
     }
 
-    // Public: single seller profile + stocks + agencies
+    // Public: single seller profile + stocks
     public function show(User $user)
     {
         abort_unless($user->role === 'seller', 404);
@@ -32,7 +32,6 @@ class SellerController extends Controller
         return response()->json([
             'seller' => $user,
             'stocks' => $user->fishStocks()->with('category')->where('status', 'active')->get(),
-            'agencies' => $user->deliveryAgencies()->where('is_active', true)->get(),
         ]);
     }
 
@@ -60,15 +59,16 @@ class SellerController extends Controller
 
     /**
      * Seller's live list of buyers who have placed orders on their
-     * platform — contact info, when they ordered, and delivery
-     * status. Powers the "Manage Buyers" sidebar section.
+     * platform — contact info (including phone, so the seller can
+     * call them) and when they ordered. Powers the "Manage Buyers"
+     * sidebar section.
      */
     public function buyers(Request $request)
     {
         $seller = $request->user();
         abort_unless($seller->role === 'seller', 403);
 
-        $orders = \App\Models\Order::with(['buyer', 'delivery'])
+        $orders = \App\Models\Order::with('buyer')
             ->where('seller_id', $seller->id)
             ->latest()
             ->get();
@@ -82,8 +82,6 @@ class SellerController extends Controller
                 'ordered_at' => $order->created_at->toIso8601String(),
                 'order_status' => $order->status,
                 'payment_status' => $order->payment_status,
-                'delivery_status' => $order->delivery?->delivery_status ?? 'pending',
-                'delivery_address' => $order->delivery?->delivery_address,
             ];
         });
 
