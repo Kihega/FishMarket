@@ -3,9 +3,7 @@
 namespace App\Http\Controllers\API;
 
 use App\Http\Controllers\Controller;
-use App\Models\DeliveryAgency;
 use App\Models\Order;
-use App\Models\OrderDelivery;
 use App\Models\FishStock;
 use App\Models\Bill;
 use Illuminate\Http\Request;
@@ -17,7 +15,10 @@ class OrderController extends Controller
     // themselves without seller involvement.
     private const CANCEL_WINDOW_MINUTES = 2;
 
-    // Buyer places an order (one or more fish items from one seller)
+    // Buyer places an order (one or more fish items from one seller).
+    // Delivery itself isn't tracked in the app — the seller sees the
+    // buyer's phone number on the order (their account requires one)
+    // and calls them directly to sort out delivery.
     public function store(Request $request)
     {
         $data = $request->validate([
@@ -26,32 +27,7 @@ class OrderController extends Controller
             'items.*.stock_id' => 'required|exists:fish_stocks,id',
             'items.*.quantity_kg' => 'required|numeric|min:0.1',
             'payment_method' => 'required|in:mobile,bank',
-            // Choosing a delivery agency is optional — a buyer may
-            // arrange their own delivery instead.
-            'agency_id' => 'nullable|exists:delivery_agencies,id',
-            'delivery_method' => 'nullable|string',
-            // Required whenever an agency is chosen: the exact physical
-            // location the buyer wants the order delivered to.
-            'delivery_address' => 'nullable|string|max:500',
         ]);
-
-        if (! empty($data['agency_id']) && empty(trim($data['delivery_address'] ?? ''))) {
-            abort(422, 'Please enter the physical location for delivery.');
-        }
-
-        $deliveryFee = 0;
-        $agency = null;
-
-        if (! empty($data['agency_id'])) {
-            $agency = DeliveryAgency::where('id', $data['agency_id'])
-                ->where('seller_id', $data['seller_id'])
-                ->where('is_active', true)
-                ->first();
-
-            abort_unless($agency, 422, 'Selected delivery agency is not available for this seller.');
-
-            $deliveryFee = (float) $agency->delivery_fee;
-        }
 
         $total = 0;
         $orderItems = [];
@@ -73,8 +49,6 @@ class OrderController extends Controller
             ];
         }
 
-        $total += $deliveryFee;
-
         $order = Order::create([
             'buyer_id' => $request->user()->id,
             'seller_id' => $data['seller_id'],
@@ -88,23 +62,7 @@ class OrderController extends Controller
             $order->items()->create($item);
         }
 
-        // Only record a delivery row when the buyer actually chose one
-        // of the seller's agencies — otherwise they're arranging their
-        // own delivery, so there's nothing to track here.
-        if ($agency) {
-            OrderDelivery::create([
-                'order_id' => $order->id,
-                'agency_id' => $agency->id,
-                // Snapshotted at order time (like fish_name/price_per_kg
-                // on OrderItem) so a later change to the agency's fee
-                // never rewrites the cost of a past order.
-                'delivery_fee' => $deliveryFee,
-                'delivery_address' => trim($data['delivery_address']),
-                'delivery_method' => $data['delivery_method'] ?? null,
-            ]);
-        }
-
-        return response()->json($order->load('items', 'delivery'), 201);
+        return response()->json($order->load('items'), 201);
     }
 
     // Buyer marks payment done → order becomes "received", seller can now confirm
@@ -168,40 +126,16 @@ class OrderController extends Controller
         return response()->json($order);
     }
 
-    // Buyer: confirm physical delivery was received. Sets the
-    // delivery status to 'delivered', which is what the seller sees
-    // in their "Manage Buyers" panel. If the buyer arranged their own
-    // delivery (no agency chosen at checkout, so no OrderDelivery row
-    // exists yet), one is created here on the fly.
-    public function confirmDelivery(Request $request, Order $order)
-    {
-        abort_unless($order->buyer_id === $request->user()->id, 403);
-
-        abort_unless(
-            in_array($order->status, ['confirmed', 'processed']),
-            422,
-            'Order has not been confirmed by the seller yet.'
-        );
-
-        $delivery = $order->delivery ?? $order->delivery()->create([
-            'agency_id' => null,
-            'delivery_fee' => 0,
-            'delivery_status' => 'pending',
-        ]);
-
-        $delivery->update(['delivery_status' => 'delivered']);
-
-        return response()->json($order->load('items', 'delivery', 'bill'));
-    }
-
-    // List orders for the current user (buyer sees own orders, seller sees incoming orders)
+    // List orders for the current user (buyer sees own orders, seller sees incoming orders).
+    // Sellers get the buyer relation loaded so the buyer's phone number
+    // is available on every order for delivery coordination calls.
     public function index(Request $request)
     {
         $user = $request->user();
 
         $orders = $user->role === 'seller'
-            ? $user->ordersAsSeller()->with('buyer', 'items', 'delivery', 'bill')
-            : $user->ordersAsBuyer()->with('seller', 'items', 'delivery', 'bill');
+            ? $user->ordersAsSeller()->with('buyer', 'items', 'bill')
+            : $user->ordersAsBuyer()->with('seller', 'items', 'bill');
 
         return response()->json($orders->latest()->paginate(20));
     }

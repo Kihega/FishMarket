@@ -13,7 +13,7 @@ import AddStockForm from '../../components/stocks/AddStockForm'
 import EditStockForm from '../../components/stocks/EditStockForm'
 import {
   HomeIcon, ClipboardListIcon, PackageIcon, ContactIcon,
-  TruckIcon, LockIcon, LogoutIcon,
+  LockIcon, LogoutIcon,
 } from '../../components/dashboard/Icons'
 
 const SECTIONS = [
@@ -21,7 +21,6 @@ const SECTIONS = [
   { key: 'orders',   label: 'Manage Orders',     icon: ClipboardListIcon },
   { key: 'stocks',   label: 'Manage Stocks',     icon: PackageIcon },
   { key: 'buyers',   label: 'Manage Buyers',     icon: ContactIcon },
-  { key: 'agencies', label: 'Delivery Partners', icon: TruckIcon },
   { key: 'password', label: 'Change Password',   icon: LockIcon },
   { key: 'logout',   label: 'Logout',            icon: LogoutIcon },
 ]
@@ -44,7 +43,6 @@ export default function SellerDashboard() {
         {active === 'orders'   && <OrdersPanel />}
         {active === 'stocks'   && <StocksPanel />}
         {active === 'buyers'   && <BuyersPanel />}
-        {active === 'agencies' && <AgenciesPanel />}
       </DashboardLayout>
       {showPasswordModal && <ChangePasswordModal onClose={() => setShowPasswordModal(false)} />}
     </>
@@ -92,6 +90,9 @@ function StatCard({ label, value }) {
 }
 
 // ── MANAGE ORDERS — polls every 10 s ─────────────────────────────────
+// Shows the buyer's phone number on every order so the seller can call
+// them directly about delivery or anything else — there's no in-app
+// delivery tracking, this is the handoff point to a real phone call.
 function OrdersPanel() {
   const qc = useQueryClient()
 
@@ -124,6 +125,9 @@ function OrdersPanel() {
             >
               <div>
                 <p className="font-semibold">Order #{order.id} — {order.buyer?.name}</p>
+                {order.buyer?.phone && (
+                  <p className="text-gray-500 text-sm">Call buyer: {order.buyer.phone}</p>
+                )}
                 <p className="text-gray-500 text-sm">
                   {formatTsh(order.total_amount)} · {order.payment_status}
                 </p>
@@ -257,111 +261,11 @@ function BuyersPanel() {
                 <span className="text-xs capitalize bg-blue-50 text-blue-700 px-2 py-1 rounded-full">
                   {b.order_status}
                 </span>
-                <p className="text-xs text-gray-400 mt-1 capitalize">
-                  Delivery: {b.delivery_status}
-                </p>
-                {b.delivery_address && (
-                  <p className="text-xs text-gray-400 mt-1 max-w-xs text-right">
-                    Deliver to: {b.delivery_address}
-                  </p>
-                )}
               </div>
             </div>
           ))
         ) : (
           <p className="text-gray-400 p-6 text-center">No buyers yet.</p>
-        )}
-      </div>
-    </div>
-  )
-}
-
-// ── DELIVERY PARTNERS — polls every 15 s ─────────────────────────────
-function AgenciesPanel() {
-  const qc = useQueryClient()
-  const [form, setForm] = useState({ agency_name: '', contact: '', area_covered: '', delivery_fee: '' })
-
-  const { data: agencies } = useQuery({
-    queryKey: ['seller-agencies'],
-    queryFn: () => client.get('/agencies').then((r) => r.data),
-    refetchInterval: 15000,
-    staleTime: 0,
-  })
-
-  const addAgency = useMutation({
-    mutationFn: (data) => client.post('/agencies', data),
-    onSuccess: () => {
-      toast.success('Delivery partner added')
-      qc.invalidateQueries({ queryKey: ['seller-agencies'] })
-      setForm({ agency_name: '', contact: '', area_covered: '', delivery_fee: '' })
-    },
-  })
-
-  const removeAgency = useMutation({
-    mutationFn: (id) => client.delete(`/agencies/${id}`),
-    onSuccess: () => {
-      toast.success('Delivery partner removed')
-      qc.invalidateQueries({ queryKey: ['seller-agencies'] })
-    },
-  })
-
-  return (
-    <div>
-      <h1 className="text-2xl font-bold text-blue-900 mb-6">Delivery Partners</h1>
-
-      <div className="bg-white rounded-xl shadow p-5 mb-6">
-        <h2 className="font-bold text-blue-900 mb-3">Add Delivery Partner</h2>
-        <div className="grid sm:grid-cols-4 gap-3">
-          <input
-            placeholder="Agency Name" className="input"
-            value={form.agency_name}
-            onChange={(e) => setForm({ ...form, agency_name: e.target.value })}
-          />
-          <input
-            placeholder="Contact" className="input"
-            value={form.contact}
-            onChange={(e) => setForm({ ...form, contact: e.target.value })}
-          />
-          <input
-            placeholder="Area Covered" className="input"
-            value={form.area_covered}
-            onChange={(e) => setForm({ ...form, area_covered: e.target.value })}
-          />
-          <input
-            placeholder="Delivery Fee (Tsh)" className="input" type="number" min="0" step="1"
-            value={form.delivery_fee}
-            onChange={(e) => setForm({ ...form, delivery_fee: e.target.value })}
-          />
-        </div>
-        <button
-          onClick={() => addAgency.mutate(form)}
-          disabled={!form.agency_name || addAgency.isPending}
-          className="btn-primary mt-3"
-        >
-          {addAgency.isPending ? 'Adding…' : 'Add Partner'}
-        </button>
-      </div>
-
-      <div className="bg-white rounded-xl shadow divide-y">
-        {agencies?.length ? (
-          agencies.map((a) => (
-            <div key={a.id} className="flex justify-between items-center p-4">
-              <div>
-                <p className="font-semibold">{a.agency_name}</p>
-                <p className="text-sm text-gray-500">
-                  {a.contact} · {a.area_covered} · {formatTsh(a.delivery_fee)} delivery fee
-                </p>
-              </div>
-              <button
-                onClick={() => removeAgency.mutate(a.id)}
-                className="text-red-500 text-sm hover:underline"
-              >
-                Remove
-              </button>
-            </div>
-          ))
-        ) : (
-          <p className="text-gray-400 p-6 text-center">No delivery partners yet.</p>
         )}
       </div>
     </div>

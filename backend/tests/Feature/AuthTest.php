@@ -106,8 +106,12 @@ class AuthTest extends TestCase
             ->assertJsonPath('user.phone', '+255712345678');
     }
 
-    public function test_registration_allows_phone_to_be_omitted_entirely(): void
+    public function test_registration_rejects_buyer_without_phone(): void
     {
+        // Buyers must give a real, callable number so the seller can
+        // reach them about delivery — sellers are unaffected (see
+        // test_seller_registers_immediately_active, which registers
+        // successfully with no phone at all).
         $response = $this->postJson('/api/register', [
             'name' => 'No Phone',
             'email' => 'nophone@example.com',
@@ -116,8 +120,7 @@ class AuthTest extends TestCase
             'role' => 'buyer',
         ]);
 
-        $response->assertStatus(201)
-            ->assertJsonPath('user.phone', null);
+        $response->assertStatus(422);
     }
 
     public function test_registration_rejects_weak_password_without_special_character(): void

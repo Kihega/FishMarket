@@ -5,7 +5,6 @@ use App\Http\Controllers\API\AuthController;
 use App\Http\Controllers\API\SellerController;
 use App\Http\Controllers\API\FishStockController;
 use App\Http\Controllers\API\FishCategoryController;
-use App\Http\Controllers\API\DeliveryAgencyController;
 use App\Http\Controllers\API\OrderController;
 use App\Http\Controllers\API\SubscriptionController;
 use App\Http\Controllers\API\AdminController;
@@ -45,18 +44,12 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::put('/stocks/{fishStock}', [FishStockController::class, 'update']);
     Route::delete('/stocks/{fishStock}', [FishStockController::class, 'destroy']);
 
-    // Delivery agencies (seller only)
-    Route::get('/agencies', [DeliveryAgencyController::class, 'index']);
-    Route::post('/agencies', [DeliveryAgencyController::class, 'store']);
-    Route::delete('/agencies/{deliveryAgency}', [DeliveryAgencyController::class, 'destroy']);
-
     // Orders
     Route::get('/orders', [OrderController::class, 'index']);
     Route::post('/orders', [OrderController::class, 'store']);
     Route::post('/orders/{order}/pay', [OrderController::class, 'pay']);
     Route::post('/orders/{order}/confirm', [OrderController::class, 'confirm']);
     Route::post('/orders/{order}/cancel', [OrderController::class, 'cancel']);
-    Route::post('/orders/{order}/confirm-delivery', [OrderController::class, 'confirmDelivery']);
 
     // Admin only
     Route::middleware('admin')->prefix('admin')->group(function () {
