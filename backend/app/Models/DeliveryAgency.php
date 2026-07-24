@@ -5,17 +5,17 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 
-class Subscription extends Model
+class DeliveryAgency extends Model
 {
     use HasFactory;
 
-    protected $fillable = ['seller_id', 'plan', 'amount', 'status', 'paid_at'];
+    protected $fillable = ['seller_id', 'agency_name', 'contact', 'area_covered', 'delivery_fee', 'is_active'];
 
     protected function casts(): array
     {
         return [
-            'amount' => 'decimal:2',
-            'paid_at' => 'datetime',
+            'is_active' => 'boolean',
+            'delivery_fee' => 'decimal:2',
         ];
     }
 

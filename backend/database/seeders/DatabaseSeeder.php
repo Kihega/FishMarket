@@ -32,7 +32,6 @@ class DatabaseSeeder extends Seeder
                 'password'            => Hash::make($password),
                 'role'                => 'admin',
                 'is_active'           => true,
-                'subscription_status' => 'active',
             ]
         );
 

@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import { Fish, MapPin, Receipt } from 'lucide-react'
-import { getOrders, cancelOrder } from '../../api/orders'
+import { getOrders, cancelOrder, confirmDelivery } from '../../api/orders'
 import { getSellers } from '../../api/sellers'
 import { resolveImage } from '../../api/client'
 import { useAuthStore } from '../../store/authStore'
@@ -122,6 +122,13 @@ function canCancel(order) {
   return ageMinutes <= CANCEL_WINDOW_MINUTES
 }
 
+// Whether the buyer can confirm delivery — seller has confirmed (or
+// processed) the order and it hasn't already been marked delivered.
+function canConfirmDelivery(order) {
+  return (order.status === 'confirmed' || order.status === 'processed')
+    && order.delivery?.delivery_status !== 'delivered'
+}
+
 // ── MY ORDERS — polls every 15 s ─────────────────────────────────────
 function OrdersPanel() {
   const qc = useQueryClient()
@@ -144,6 +151,17 @@ function OrdersPanel() {
     },
   })
 
+  const confirmDeliveryMutation = useMutation({
+    mutationFn: (id) => confirmDelivery(id),
+    onSuccess: () => {
+      toast.success('Delivery confirmed — thanks!')
+      qc.invalidateQueries({ queryKey: ['my-orders'] })
+    },
+    onError: (err) => {
+      toast.error(err?.response?.data?.message || 'Could not confirm delivery')
+    },
+  })
+
   return (
     <div>
       <h1 className="text-2xl font-bold text-blue-900 mb-2">My Orders</h1>
@@ -161,6 +179,11 @@ function OrdersPanel() {
                   <p className="text-gray-500 text-sm">
                     {order.items?.length} item(s) · {formatTsh(order.total_amount)}
                   </p>
+                  {order.delivery && (
+                    <p className="text-xs text-gray-400 mt-1 capitalize">
+                      Delivery: {order.delivery.delivery_status}
+                    </p>
+                  )}
                 </div>
                 <span className={`text-xs px-3 py-1 rounded-full font-medium ${STATUS_STYLE[order.status] ?? ''}`}>
                   {order.status?.toUpperCase()}
@@ -180,6 +203,15 @@ function OrdersPanel() {
                     className="text-red-500 text-sm hover:underline"
                   >
                     Cancel Order
+                  </button>
+                )}
+                {canConfirmDelivery(order) && (
+                  <button
+                    onClick={() => confirmDeliveryMutation.mutate(order.id)}
+                    disabled={confirmDeliveryMutation.isPending}
+                    className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 text-sm"
+                  >
+                    Confirm Delivery
                   </button>
                 )}
               </div>

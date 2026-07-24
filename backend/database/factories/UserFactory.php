@@ -20,7 +20,6 @@ class UserFactory extends Factory
             'phone' => fake()->phoneNumber(),
             'location' => fake()->city(),
             'is_active' => true,
-            'subscription_status' => 'inactive',
             'remember_token' => \Illuminate\Support\Str::random(10),
         ];
     }
@@ -29,7 +28,6 @@ class UserFactory extends Factory
     {
         return $this->state(fn () => [
             'role' => 'seller',
-            'subscription_status' => 'active',
             'office_address' => fake()->address(),
             'location_address' => fake()->city(),
             'bio' => fake()->sentence(),
@@ -40,7 +38,6 @@ class UserFactory extends Factory
     {
         return $this->state(fn () => [
             'role' => 'admin',
-            'subscription_status' => 'active',
         ]);
     }
 

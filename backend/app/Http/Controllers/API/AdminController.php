@@ -4,7 +4,6 @@ namespace App\Http\Controllers\API;
 
 use App\Http\Controllers\Controller;
 use App\Models\User;
-use App\Models\Subscription;
 use App\Models\FishStock;
 use App\Models\Order;
 use Illuminate\Http\Request;
@@ -43,7 +42,6 @@ class AdminController extends Controller
             'password' => Hash::make($data['password']),
             'role' => 'admin',
             'is_active' => true,
-            'subscription_status' => 'active',
         ]);
 
         return response()->json($admin, 201);
@@ -69,32 +67,14 @@ class AdminController extends Controller
         return response()->json(null, 204);
     }
 
-    public function subscriptions()
-    {
-        return response()->json(
-            Subscription::with('seller')->latest()->paginate(30)
-        );
-    }
-
-    public function confirmSubscription(Subscription $subscription)
-    {
-        $subscription->update([
-            'status' => 'active',
-            'paid_at' => now(),
-        ]);
-
-        $subscription->seller->update(['subscription_status' => 'active']);
-
-        return response()->json($subscription);
-    }
-
     public function stats()
     {
         return response()->json([
             'total_users' => User::count(),
-            'active_sellers' => User::where('role', 'seller')->where('subscription_status', 'active')->count(),
+            // No subscription gate — "active" here just means not
+            // suspended by an admin.
+            'active_sellers' => User::where('role', 'seller')->where('is_active', true)->count(),
             'total_buyers' => User::where('role', 'buyer')->count(),
-            'pending_subscriptions' => Subscription::where('status', 'pending')->count(),
         ]);
     }
 
@@ -114,7 +94,6 @@ class AdminController extends Controller
             'users' => User::count(),
             'fish_stocks' => FishStock::count(),
             'orders' => Order::count(),
-            'subscriptions' => Subscription::count(),
         ];
 
         $activeUsersLast15Min = DB::table('personal_access_tokens')
