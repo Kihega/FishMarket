@@ -97,7 +97,7 @@ class AdminUserManagementTest extends TestCase
 
         $response->assertStatus(200)
             ->assertJsonStructure([
-                'table_sizes' => ['users', 'fish_stocks', 'orders', 'subscriptions'],
+                'table_sizes' => ['users', 'fish_stocks', 'orders'],
                 'active_users_last_15_min',
                 'queries_this_request',
                 'server_time',

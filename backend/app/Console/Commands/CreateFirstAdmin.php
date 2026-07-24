@@ -46,7 +46,6 @@ class CreateFirstAdmin extends Command
             'password' => Hash::make($password),
             'role' => 'admin',
             'is_active' => true,
-            'subscription_status' => 'active',
         ]);
 
         $this->info("First admin created successfully: {$admin->email}");

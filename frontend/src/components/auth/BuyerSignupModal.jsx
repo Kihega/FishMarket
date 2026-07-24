@@ -42,8 +42,8 @@ export default function BuyerSignupModal() {
       setError('Please fill in all fields')
       return
     }
-    if (!isCompleteTzPhone(form.phone)) {
-      setError('A valid Tanzanian phone number (+255 followed by 9 digits) is required')
+    if (form.phone !== '+255' && !isCompleteTzPhone(form.phone)) {
+      setError('Phone number must be +255 followed by exactly 9 digits')
       return
     }
     if (form.password !== form.password_confirmation) {
@@ -63,7 +63,7 @@ export default function BuyerSignupModal() {
         password: form.password,
         password_confirmation: form.password_confirmation,
         role: 'buyer',
-        phone: form.phone,
+        phone: form.phone === '+255' ? null : form.phone,
       })
       setAuth(data.user, data.token)
       closeModal()
@@ -93,13 +93,10 @@ export default function BuyerSignupModal() {
         <Field icon={User} placeholder="Full Name" value={form.name} onChange={updateName('name')} />
         <Field
           icon={Phone}
-          placeholder="+255 7XX XXX XXX (required)"
+          placeholder="+255 7XX XXX XXX"
           value={form.phone}
           onChange={handlePhoneChange}
         />
-        <p className="text-xs text-gray-400 -mt-2 ml-1">
-          Sellers use this number to call you about delivery.
-        </p>
         <Field
           icon={Mail}
           type="email"

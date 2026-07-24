@@ -31,8 +31,8 @@ class AuthTest extends TestCase
 
     public function test_seller_registers_immediately_active(): void
     {
-        // No subscription/plan step anymore — sellers are immediately
-        // active and usable right after registering.
+        // No subscription/plan step — sellers are immediately active
+        // and usable right after registering.
         $response = $this->postJson('/api/register', [
             'name' => 'John Seller',
             'business_name' => 'Fresh Fish Co',
@@ -43,7 +43,6 @@ class AuthTest extends TestCase
         ]);
 
         $response->assertStatus(201)
-            ->assertJsonPath('user.subscription_status', 'active')
             ->assertJsonPath('user.business_name', 'Fresh Fish Co');
     }
 
@@ -106,12 +105,8 @@ class AuthTest extends TestCase
             ->assertJsonPath('user.phone', '+255712345678');
     }
 
-    public function test_registration_rejects_buyer_without_phone(): void
+    public function test_registration_allows_phone_to_be_omitted_entirely(): void
     {
-        // Buyers must give a real, callable number so the seller can
-        // reach them about delivery — sellers are unaffected (see
-        // test_seller_registers_immediately_active, which registers
-        // successfully with no phone at all).
         $response = $this->postJson('/api/register', [
             'name' => 'No Phone',
             'email' => 'nophone@example.com',
@@ -120,7 +115,8 @@ class AuthTest extends TestCase
             'role' => 'buyer',
         ]);
 
-        $response->assertStatus(422);
+        $response->assertStatus(201)
+            ->assertJsonPath('user.phone', null);
     }
 
     public function test_registration_rejects_weak_password_without_special_character(): void

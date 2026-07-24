@@ -7,13 +7,12 @@ import DashboardLayout from '../../components/dashboard/DashboardLayout'
 import ChangePasswordModal from '../../components/dashboard/ChangePasswordModal'
 import ModalShell from '../../components/auth/ModalShell'
 import {
-  HomeIcon, UsersIcon, StoreIcon, ActivityIcon, LockIcon, LogoutIcon,
+  HomeIcon, UsersIcon, ActivityIcon, LockIcon, LogoutIcon,
 } from '../../components/dashboard/Icons'
 
 const SECTIONS = [
   { key: 'home', label: 'Home', icon: HomeIcon },
   { key: 'users', label: 'Manage Users', icon: UsersIcon },
-  { key: 'sellers', label: 'Manage Sellers', icon: StoreIcon },
   { key: 'performance', label: 'System Performance', icon: ActivityIcon },
   { key: 'password', label: 'Change Password', icon: LockIcon },
   { key: 'logout', label: 'Logout', icon: LogoutIcon },
@@ -42,7 +41,6 @@ export default function AdminPanel() {
       <DashboardLayout items={SECTIONS} activeKey={active} onSelect={handleSelect}>
         {active === 'home' && <HomePanel />}
         {active === 'users' && <UsersPanel />}
-        {active === 'sellers' && <SellersPanel />}
         {active === 'performance' && <PerformancePanel />}
       </DashboardLayout>
 
@@ -67,7 +65,6 @@ function HomePanel() {
         <StatCard label="Total Users" value={data?.total_users} />
         <StatCard label="Active Sellers" value={data?.active_sellers} />
         <StatCard label="Total Buyers" value={data?.total_buyers} />
-        <StatCard label="Pending Subscriptions" value={data?.pending_subscriptions} />
       </div>
     </div>
   )
@@ -225,65 +222,6 @@ function RegisterAdminModal({ onClose }) {
   )
 }
 
-// ── MANAGE SELLERS — subscription/billing view ──────────────────────
-function SellersPanel() {
-  const qc = useQueryClient()
-
-  const { data: subscriptions } = useQuery({
-    queryKey: ['admin-subscriptions'],
-    queryFn: () => client.get('/admin/subscriptions').then((r) => r.data),
-  })
-
-  const confirmSubscription = useMutation({
-    mutationFn: (id) => client.put(`/admin/subscriptions/${id}/confirm`),
-    onSuccess: () => {
-      toast.success('Subscription confirmed — seller activated')
-      qc.invalidateQueries(['admin-subscriptions'])
-    },
-  })
-
-  return (
-    <div>
-      <h1 className="text-2xl font-bold text-blue-900 mb-6">Manage Seller Accounts</h1>
-      <div className="bg-white rounded-xl shadow divide-y">
-        {subscriptions?.data?.length ? (
-          subscriptions.data.map((s) => (
-            <div key={s.id} className="flex flex-wrap justify-between items-center gap-3 p-4">
-              <div>
-                <p className="font-semibold">{s.seller?.name}</p>
-                <p className="text-sm text-gray-500 capitalize">
-                  {s.plan} plan · TZS {Number(s.amount).toLocaleString()} ·{' '}
-                  <span
-                    className={
-                      s.status === 'active'
-                        ? 'text-green-600'
-                        : s.status === 'pending'
-                        ? 'text-yellow-600'
-                        : 'text-gray-400'
-                    }
-                  >
-                    {s.status}
-                  </span>
-                </p>
-              </div>
-              {s.status === 'pending' && (
-                <button
-                  onClick={() => confirmSubscription.mutate(s.id)}
-                  className="btn-primary text-sm py-1.5"
-                >
-                  Confirm Payment
-                </button>
-              )}
-            </div>
-          ))
-        ) : (
-          <p className="text-gray-400 p-6 text-center">No subscriptions yet.</p>
-        )}
-      </div>
-    </div>
-  )
-}
-
 // ── SYSTEM PERFORMANCE — live polling metrics ───────────────────────
 function PerformancePanel() {
   const { data } = useQuery({
@@ -311,7 +249,6 @@ function PerformancePanel() {
         <StatCard label="Users" value={data?.table_sizes?.users} />
         <StatCard label="Fish Stocks" value={data?.table_sizes?.fish_stocks} />
         <StatCard label="Orders" value={data?.table_sizes?.orders} />
-        <StatCard label="Subscriptions" value={data?.table_sizes?.subscriptions} />
       </div>
 
       {data?.server_time && (

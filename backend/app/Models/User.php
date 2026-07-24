@@ -14,7 +14,7 @@ class User extends Authenticatable
     protected $fillable = [
         'name', 'business_name', 'email', 'password', 'role', 'phone', 'location',
         'brand_logo', 'office_address', 'location_address', 'bio',
-        'is_active', 'subscription_status',
+        'is_active',
     ];
 
     protected $hidden = ['password', 'remember_token'];
@@ -33,6 +33,11 @@ class User extends Authenticatable
         return $this->hasMany(FishStock::class, 'seller_id');
     }
 
+    public function deliveryAgencies()
+    {
+        return $this->hasMany(DeliveryAgency::class, 'seller_id');
+    }
+
     public function ordersAsBuyer()
     {
         return $this->hasMany(Order::class, 'buyer_id');
@@ -41,10 +46,5 @@ class User extends Authenticatable
     public function ordersAsSeller()
     {
         return $this->hasMany(Order::class, 'seller_id');
-    }
-
-    public function subscriptions()
-    {
-        return $this->hasMany(Subscription::class, 'seller_id');
     }
 }
